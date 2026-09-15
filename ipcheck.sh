@@ -435,9 +435,11 @@ fio_run() {
 	esac
 }
 
-# dd 统计行里的速度换算成 字节/秒 (GNU dd: "... copied, 1.2 s, 850 MB/s")
+# dd 统计行换算成 字节/秒。GNU: "8589934592 bytes (8.6 GB, 8.0 GiB) copied, 1.2 s, 7.0 GB/s";
+# busybox: "... copied, 1.2 seconds, ..."。容量括号里也有逗号, 不能按逗号拆 (2026-09-16 香港机实测全算成 1 GB/s)
+dd_secs() { awk '/copied/ { t = $0; sub(/.*copied, /, "", t); sub(/ s.*/, "", t); print t }'; }
 dd_rate() {
-	awk '/copied/ { for (i = 1; i <= NF; i++) if ($i == "bytes") b = $(i - 1); split($0, p, ", "); s = p[2]; sub(/ s.*/, "", s); if (s > 0) printf "%.0f", b / s }'
+	awk '/copied/ { b = $1; t = $0; sub(/.*copied, /, "", t); sub(/ s.*/, "", t); if (t + 0 > 0) printf "%.0f", b / t }'
 }
 
 hw_bench() {
@@ -490,7 +492,7 @@ hw_bench() {
 		BENCH_FILE="$BENCH_DIR/.ipcheck-dd"
 		w=$(dd if=/dev/zero of="$BENCH_FILE" bs=1M count=1024 oflag=direct 2>&1 | dd_rate)
 		r=$(dd if="$BENCH_FILE" of=/dev/null bs=1M iflag=direct 2>&1 | dd_rate)
-		k=$(dd if=/dev/zero of="$BENCH_FILE" bs=4k count=2000 oflag=dsync 2>&1 | awk '/copied/ { split($0, p, ", "); s = p[2]; sub(/ s.*/, "", s); if (s > 0) printf "%.0f", 2000 / s }')
+		k=$(dd if=/dev/zero of="$BENCH_FILE" bs=4k count=2000 oflag=dsync 2>&1 | dd_secs | awk '$1 + 0 > 0 { printf "%.0f", 2000 / $1 }')
 		put "$d" bn_dd "${w:-fail}|${r:-fail}|${k:-fail}"
 		rm -f "$BENCH_FILE"
 	fi
