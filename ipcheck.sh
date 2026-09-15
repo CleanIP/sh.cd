@@ -1063,7 +1063,9 @@ run_intl_latency() {
 	for item in $INTL_NODES; do
 		(
 			best=""
-			for i in 1 2 3; do
+			for i in 1 2 3 4; do
+				# 前 3 次都失败才补第 4 次, 间隔 1 秒
+				[ $i = 4 ] && { [ -n "$best" ] && break; sleep 1; }
 				s=$(connect_time "${item#*:}" 8080)
 				if positive "$s" && { [ -z "$best" ] || awk -v a="$s" -v b="$best" 'BEGIN { exit !(a < b) }'; }; then best=$s; fi
 			done
@@ -1080,6 +1082,10 @@ stage_net() {
 	set_net 4
 	progress "$(t "[网络] 本地网络策略…" "[Network] Local network policy…")"
 	net_local "$d"
+	# 国际延迟放在最前面: 后面的三网延迟与回程会一次发出几千个包, 小机器上紧接着测会偏高或超时
+	# (2026-09-16 香港单核机全检时香港节点测出 133ms, 单独测是 4ms)
+	progress "$(t "[网络] 国际延迟…" "[Network] International latency…")"
+	run_intl_latency "$d"
 	if ! skipped latency; then
 		progress "$(t "[网络] 三网延迟 (31 省)…" "[Network] China latency (31 provinces)…")"
 		run_latency "$d"
@@ -1088,8 +1094,6 @@ stage_net() {
 		progress "$(t "[网络] 三网回程线路…" "[Network] Return routes to China…")"
 		run_route "$d"
 	fi
-	progress "$(t "[网络] 国际延迟…" "[Network] International latency…")"
-	run_intl_latency "$d"
 	if ! skipped speed; then run_speed "$d"; fi
 	cat "$d"/*/fields >>"$d/fields" 2>/dev/null
 	[ "$DEEP" = 1 ] && put "$d" deep 1
