@@ -6,14 +6,14 @@
 #   bash <(curl -Ls https://cleanip.io/ipcheck)        备用入口
 #
 # IP 情报与评分来自 CleanIP (与 cleanip.io 网页查询本机的结果一致);
-# 流媒体 / AI 解锁、邮件端口、三网延迟、DNS 出口只能在本机测, 测完连同评分一起生成报告。
+# 流媒体 / AI 解锁、邮件端口、三网延迟与回程线路、DNS 出口、带宽测速只能在本机测, 测完连同评分一起生成报告。
 #
 # 不需要 root, 不安装任何软件, 不修改系统, 只依赖 bash 与 curl。
 # 兼容 bash 3.2 (macOS 自带版本): 不用关联数组 / mapfile / ${var,,}。
 #
 # 源码: https://github.com/CleanIP/ipcheck    许可: MIT
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 API="${IPCHECK_API:-https://cleanip.io}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -28,6 +28,7 @@ IFACE=""
 JSON=0
 OPT_NOCOLOR=0
 ALL_PROVINCES=0
+SPEED=0
 SKIP=","
 
 t() { if [ "$LANG_OPT" = en ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
@@ -44,7 +45,8 @@ Usage: bash <(curl -Ls https://sh.cd) [options]
   -x PROXY      Check through a proxy, e.g. socks5h://user:pass@host:1080
   -i IFACE      Use a network interface, e.g. eth0
   -a            Latency to all 31 provinces (default: Beijing / Shanghai / Guangdong)
-  -S LIST       Skip sections: media,mail,latency,dns
+  -s            Bandwidth test (Linux only, about 1-2 minutes, uses a lot of traffic)
+  -S LIST       Skip sections: media,mail,latency,route,dns
   -j            Output JSON
   -n            No colors
   -l zh|en      Language (-E = English)
@@ -64,7 +66,8 @@ CleanIP ipcheck v$VERSION — IP 质量检测
   -x PROXY      通过代理检测, 例: socks5h://user:pass@host:1080
   -i IFACE      指定网卡, 例: eth0
   -a            三网延迟测全国 31 省 (默认只测北京 / 上海 / 广东)
-  -S LIST       跳过部分检测: media,mail,latency,dns (逗号分隔)
+  -s            带宽测速 (仅 Linux, 约 1–2 分钟, 流量消耗较大)
+  -S LIST       跳过部分检测: media,mail,latency,route,dns (逗号分隔)
   -j            输出 JSON
   -n            不显示颜色
   -l zh|en      语言 (-E 等同 -l en)
@@ -79,13 +82,14 @@ EOF
 # 先扫一遍语言参数, 让 -h 的帮助和参数报错也用对语言
 for a in "$@"; do case "$a" in -E | -len* | -lEN*) LANG_OPT=en ;; esac; done
 
-while getopts ":46x:i:aS:jnl:Ehv" opt; do
+while getopts ":46x:i:asS:jnl:Ehv" opt; do
 	case "$opt" in
 	4) ONLY_FAMILY=4 ;;
 	6) ONLY_FAMILY=6 ;;
 	x) PROXY="$OPTARG" ;;
 	i) IFACE="$OPTARG" ;;
 	a) ALL_PROVINCES=1 ;;
+	s) SPEED=1 ;;
 	S) SKIP=",$OPTARG," ;;
 	j) JSON=1 ;;
 	n) OPT_NOCOLOR=1 ;;
@@ -340,6 +344,140 @@ run_latency() {
 	wait
 }
 
+# ── 三网回程线路: 逐跳记录去往国内三网的路由, 线路类型 (CN2 GIA / 9929 / CMIN2 …) 由报告按骨干网段判定 ──
+# 不依赖 traceroute: 用系统自带的 ping 按 TTL 1–30 并行各发一个包, 收集「TTL 超时」回包的来源 IP。
+# Linux 的 ping 不需要 root (2026-09-15 洛杉矶机 root 与 nobody 实测结果一致), 每个目标约 1–2 秒。
+# 只测 IPv4: 骨干网段判定规则按 IPv4 整理。
+
+ROUTE_TARGETS="bj_ct:219.141.140.10 bj_cu:202.106.195.68 bj_cm:221.179.155.161 sh_ct:202.96.209.133 sh_cu:210.22.97.1 sh_cm:211.136.112.200 gd_ct:58.60.188.222 gd_cu:210.21.196.6 gd_cm:120.196.165.24"
+
+hop_ip() {
+	local ttl="$1" target="$2"
+	if [ "$(uname -s)" = Darwin ]; then
+		# macOS: -m 是 TTL, -W 单位毫秒; -t 在 macOS 上是总超时
+		ping -n -c 1 -W 1000 -m "$ttl" "$target" 2>/dev/null
+	else
+		ping -n -c 1 -W 1 -t "$ttl" ${IFACE:+-I "$IFACE"} "$target" 2>/dev/null
+	fi | grep -oE '[Ff]rom ([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 | cut -d' ' -f2
+}
+
+route_trace() {
+	local target="$1" out="$2" ttl k
+	# 每个 TTL 发 2 个包: 只发 1 个时常有中间跳不回应, 少了 CN2 段的跳数会把 GIA 误判成混合
+	for ttl in $(seq 1 30); do
+		for k in 1 2; do
+			(ip=$(hop_ip "$ttl" "$target") && [ -n "$ip" ] && echo "$ttl:$ip" >>"$out") &
+		done
+	done
+	wait
+}
+
+run_route() {
+	local d="$1" item key n=0 hops
+	command -v ping >/dev/null 2>&1 || return 0
+	mkdir -p "$d/route"
+	for item in $ROUTE_TARGETS; do
+		key="${item%%:*}"
+		(
+			route_trace "${item#*:}" "$d/route/$key.hops"
+			# 按跳数排序, 到达目标后后面的 TTL 都是目标自己回的, 只留第一次
+			hops=$(sort -t: -k1,1n "$d/route/$key.hops" 2>/dev/null | awk -F: '!seen[$2]++' | paste -sd, -)
+			put "$d/route" "rt_$key" "${hops:-none}"
+		) &
+		n=$((n + 1))
+		# 3 个目标一批, 每批约 180 个 ping 同时在飞
+		[ $((n % 3)) = 0 ] && wait
+	done
+	wait
+}
+
+# ── 带宽测速 (-s): Speedtest 节点的 TCP 协议, 4 条并发取第 2–8 秒的平均速度 ──────────────
+# 不下载任何测速客户端: 用 /dev/tcp 发 Speedtest 服务器的 DOWNLOAD / UPLOAD 指令, dd 计量。
+# dd 在后台时 SIGINT 会被忽略, 所以用两次 SIGUSR1 各取一次累计字节数, 相减去掉 TCP 慢启动的前 2 秒。
+# 依赖 GNU / busybox dd 的 SIGUSR1 统计输出, 只在 Linux 上跑。
+#
+# 国内节点只列境外能连上且测得准的 (2026-09-16 洛杉矶与香港两地实测): 电信、移动的 Speedtest 节点
+# 不接受境外连接或对境外限速, 报告里如实显示「暂无境外可用节点」。
+# 一行一个: 运营商|省份代码 (报告按语言显示名称)|主机:端口
+# 苏州移动 (speedtest.jsqiuying.com) 能连上但对境外下载限速到 0.5 Mbps (上传正常), 会误导, 不用。
+SPEED_NODES='cu|bj|beijing.unicomtest.com:8080
+cu|sh|mobile.shunicomtest.com.prod.hosts.ooklaserver.net:8080'
+
+dd_bytes_secs() {
+	# 从 dd 的统计输出取每一次的 "字节数 秒数"
+	grep -E 'bytes.*copied' "$1" 2>/dev/null | sed -E 's/^([0-9]+) bytes.*copied, ([0-9.]+) s.*/\1 \2/'
+}
+
+speed_stream() {
+	local dir="$1" host="${2%:*}" port="${2##*:}" err="$3" pid
+	exec 3<>"/dev/tcp/$host/$port" || return 1
+	if [ "$dir" = down ]; then
+		printf 'DOWNLOAD 4000000000\n' >&3
+		dd of=/dev/null bs=65536 <&3 2>"$err" &
+	else
+		printf 'UPLOAD 4000000000 0\n' >&3
+		dd if=/dev/zero bs=65536 count=61035 >&3 2>"$err" &
+	fi
+	pid=$!
+	sleep 2
+	kill -USR1 "$pid" 2>/dev/null
+	sleep 6
+	kill -USR1 "$pid" 2>/dev/null
+	sleep 0.2
+	kill -9 "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	exec 3<&-
+}
+
+# 4 条并发, 输出 Mbps (保留 1 位), 失败输出空
+speed_dir() {
+	local dir="$1" hostport="$2" d="$3" i
+	for i in 1 2 3 4; do
+		(speed_stream "$dir" "$hostport" "$d/$dir.$i.err") 2>/dev/null &
+	done
+	wait
+	for i in 1 2 3 4; do dd_bytes_secs "$d/$dir.$i.err" | tail -n 2 | paste -sd' ' -; done |
+		awk 'NF == 4 && $4 > $2 { bps += ($3 - $1) / ($4 - $2); n++ } END { if (n) printf "%.1f", bps * 8 / 1e6 }'
+}
+
+speed_hello() {
+	(exec 3<>"/dev/tcp/${1%:*}/${1##*:}" && printf 'HI\n' >&3 && IFS= read -r -t 3 line <&3 && [ "${line#HELLO}" != "$line" ]) 2>/dev/null &
+	local pid=$! i=0
+	while kill -0 "$pid" 2>/dev/null && [ $i -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+	if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; return 1; fi
+	wait "$pid"
+}
+
+run_speed() {
+	local d="$1" nodes="$SPEED_NODES" n=0 carrier name hostport down up near
+	[ "$(uname -s)" = Linux ] || return 0
+	mkdir -p "$d/speed"
+	# 就近节点: Speedtest 按来源 IP 就近排序的公开列表, 取第一个, 代表这台机器本地的带宽
+	near=$(ccurl -s -m 10 https://www.speedtest.net/speedtest-servers-static.php 2>/dev/null |
+		grep -oE '<server [^>]+>' | head -n1)
+	if [ -n "$near" ]; then
+		name=$(printf '%s' "$near" | sed -E 's/.* name="([^"]*)".*/\1/')
+		hostport=$(printf '%s' "$near" | sed -E 's/.* host="([^"]*)".*/\1/')
+		nodes="near|$name|$hostport
+$nodes"
+	fi
+	while IFS='|' read -r carrier name hostport; do
+		[ -n "$hostport" ] || continue
+		n=$((n + 1))
+		progress "$(t "带宽测速: 第 $n 个节点…" "Bandwidth test: server $n…")"
+		if ! speed_hello "$hostport" </dev/null; then
+			put "$d/speed" "sp_$n" "$carrier|$name|fail|fail"
+			continue
+		fi
+		mkdir -p "$d/speed/$n"
+		down=$(speed_dir down "$hostport" "$d/speed/$n" </dev/null)
+		up=$(speed_dir up "$hostport" "$d/speed/$n" </dev/null)
+		put "$d/speed" "sp_$n" "$carrier|$name|${down:-fail}|${up:-fail}"
+	done <<EOF
+$nodes
+EOF
+}
+
 # ── DNS 出口 ─────────────────────────────────────────────────────────────
 # 按系统 DNS 解析几个一次性子域名, CleanIP 的权威 DNS 会记下是哪台递归服务器来问的。
 
@@ -403,7 +541,15 @@ check_exit() {
 		progress "$(t "[$label] 测三网延迟…" "[$label] Measuring China carrier latency…")"
 		run_latency "$d"
 	fi
+	if ! skipped route && [ "$ex" = 4 ] && [ -z "$PROXY" ]; then
+		progress "$(t "[$label] 测三网回程线路…" "[$label] Tracing routes to China carriers…")"
+		run_route "$d"
+	fi
 	wait
+	# 测速最后单独跑: 和其它检测同时进行会互相抢带宽
+	if [ "$SPEED" = 1 ] && [ "$ex" = 4 ] && [ -z "$PROXY" ] && [ -z "$IFACE" ]; then
+		run_speed "$d"
+	fi
 	progress "$(t "[$label] 生成报告…" "[$label] Generating report…")"
 
 	cat "$d"/*/fields >>"$d/fields" 2>/dev/null
