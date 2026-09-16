@@ -288,7 +288,8 @@ hw_collect() {
 		up=$(cut -d. -f1 /proc/uptime)
 		load=$(cut -d' ' -f1-3 /proc/loadavg)
 	else
-		up=$(($(date +%s) - $(sysctl -n kern.boottime 2>/dev/null | sed -E 's/.*sec = ([0-9]+).*/\1/')))
+		# macOS: "{ sec = 1789500000, usec = 123456 } ..."; 贪婪匹配会取到 usec, 算出两万天
+		up=$(($(date +%s) - $(sysctl -n kern.boottime 2>/dev/null | sed -E 's/^\{ sec = ([0-9]+),.*/\1/')))
 		load=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{ print $1, $2, $3 }')
 	fi
 	put "$d" hw_uptime "$up|$load"
@@ -337,6 +338,9 @@ hw_collect_cpu() {
 	put "$d" hw_cpu "$(clean "$model")|$cores|$threads|${sockets:-1}|${mhz%%.*}|$(cpu_usage)"
 	put "$d" hw_cache "$(clean "$(lv 'L1d cache' | cut -d'(' -f1)")|$(clean "$(lv 'L1i cache' | cut -d'(' -f1)")|$(clean "$(lv 'L2 cache' | cut -d'(' -f1)")|$(clean "$(lv 'L3 cache' | cut -d'(' -f1)")"
 	fl=" $(grep -m1 -E '^(flags|Features)' /proc/cpuinfo 2>/dev/null | cut -d: -f2) $(sysctl -n machdep.cpu.features machdep.cpu.leaf7_features 2>/dev/null | tr 'A-Z.' 'a-z_' | tr '\n' ' ') "
+	# Apple 芯片: sysctl hw.optional.arm.FEAT_* 为 1 表示支持
+	[ "$(sysctl -n hw.optional.arm.FEAT_AES 2>/dev/null)" = 1 ] && fl="$fl aes "
+	[ "$(sysctl -n hw.optional.arm.FEAT_SHA256 2>/dev/null)" = 1 ] && fl="$fl sha2 "
 	for x in vmx svm aes avx avx2 avx512f bmi1 bmi2 sha_ni ept npt sha1 sha2 hypervisor; do
 		case "$fl" in *" $x "*) flags="$flags,$x" ;; esac
 	done
@@ -349,7 +353,7 @@ hw_collect_mem() {
 		put "$d" hw_mem "$(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } /^SwapTotal:/ { st = $2 } /^SwapFree:/ { sf = $2 }
 			END { printf "%.0f|%.0f|%.0f|%.0f|%.0f", t * 1024, (t - a) * 1024, a * 1024, st * 1024, (st - sf) * 1024 }' /proc/meminfo)"
 	elif [ "$(uname -s)" = Darwin ]; then
-		put "$d" hw_mem "$(sysctl -n hw.memsize 2>/dev/null)|||"
+		put "$d" hw_mem "$(sysctl -n hw.memsize 2>/dev/null)||||"
 	fi
 	# 超开迹象: virtio 气球回收设备、KSM 内存合并
 	ls /sys/bus/virtio/drivers/virtio_balloon 2>/dev/null | grep -q virtio && oc="balloon"
@@ -771,7 +775,7 @@ stage_ip_exit() {
 #   nt_nat=open|公网IP 或 nat|公网IP 或 fail   nt_tcp=拥塞控制|队列|rmem|wmem   nt_v6=yes|no
 #   lat_<省>_<ct|cu|cm>=5 次采样毫秒 (0 = 丢包), 逗号分隔
 #   rt_<bj|sh|gd>_<ct|cu|cm>=TTL:IP,…  (深度模式 TTL:IP:毫秒)   一跳都没回应为 none
-#   sp_<n>=<ct|cu|cm|intl|near>|<地点代码或城市名>|下载Mbps|上传Mbps
+#   sp_<n>=<ct|cu|cm|intl|near>|<地点代码或城市名>|下载Mbps|上传Mbps  (fail = 连不上, stall = 节点不收发)
 #   il_<地点代码>=毫秒 或 fail
 
 # ── 本地网络策略: NAT 类型 (纯 bash 发 STUN 请求)、TCP 拥塞控制与缓冲区 ──
@@ -959,7 +963,8 @@ route_rtt() {
 #
 # 节点清单 2026-09-16 从 speedtest.net 与 speedtest.cn 的公开节点逐个实测 (洛杉矶 + 香港):
 # 国内电信、联通只有下面几个接受境外连接且速度正常; 国内移动的节点全部封境外或限速到接近 0,
-# 移动改用中国移动香港 (报告里标明是香港)。国际节点统一用 GSL Networks, 各地之间才有可比性。
+# 移动改用中国移动香港 (报告里标明是香港)。国际节点优先用 GSL Networks, 各地之间才有可比性;
+# GSL 东京的 8080 时通时拒 (2026-09-16), 备用 Verizon 东京。
 # 一行一个: 组|运营商|地点代码|主机:端口; 同一组按顺序测, 前一个连不上才换下一个。
 SPEED_NODES='ct|ct|sh|speedtest1.online.sh.cn:8080
 ct|ct|js|5gnanjing.speedtest.jsinfo.net:8080
@@ -968,13 +973,14 @@ cu|cu|bj|beijing.unicomtest.com:8080
 cm|cm|hk|speedtestbb.hk.chinamobile.com:8080
 hk|intl|hk|hk1.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080
 tyo|intl|tyo|ty8.speedtest.gslnetworks.com:8080
+tyo|intl|tyo|jp-nperf.verizon.net.prod.hosts.ooklaserver.net:8080
 sgp|intl|sgp|sg3.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080
 lax|intl|lax|la2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080
 fra|intl|fra|fr5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080
 lon|intl|lon|thn.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080'
 
-# 国际延迟节点 (同为 GSL Networks): 地点代码:主机
-INTL_NODES="hk:hk1.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net tpe:tpe.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net sel:seoul.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net tyo:ty8.speedtest.gslnetworks.com sgp:sg3.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net syd:sy5.test.gslnetworks.com.au lax:la2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net nyc:ny2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net fra:fr5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net ams:am5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net lon:thn.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net par:par.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net"
+# 国际延迟节点 (GSL Networks, 东京备用 Verizon): 地点代码:主机[|备用主机]
+INTL_NODES="hk:hk1.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net tpe:tpe.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net sel:seoul.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net tyo:ty8.speedtest.gslnetworks.com|jp-nperf.verizon.net.prod.hosts.ooklaserver.net sgp:sg3.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net syd:sy5.test.gslnetworks.com.au lax:la2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net nyc:ny2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net fra:fr5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net ams:am5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net lon:thn.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net par:par.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net"
 
 dd_bytes_secs() {
 	# 从 dd 的统计输出取每一次的 "字节数 秒数"
@@ -1002,7 +1008,9 @@ speed_stream() {
 	exec 3<&-
 }
 
-# 4 条并发, 输出 Mbps (保留 1 位), 失败输出空
+# 4 条并发, 输出 Mbps (保留 1 位), 失败输出空; 每条连接在计量窗口里都几乎没有进展时输出 stall ——
+# 节点不接收时, 前 2 秒写进去的只是本机发送缓冲区, 之后停住 (2026-09-16 香港上传到国内节点实测),
+# 这时报「节点受限」, 不能报成本机只有 0.1 Mbps
 speed_dir() {
 	local dir="$1" hostport="$2" d="$3" i
 	for i in 1 2 3 4; do
@@ -1010,7 +1018,8 @@ speed_dir() {
 	done
 	wait
 	for i in 1 2 3 4; do dd_bytes_secs "$d/$dir.$i.err" | tail -n 2 | paste -sd' ' -; done |
-		awk 'NF == 4 && $4 > $2 { bps += ($3 - $1) / ($4 - $2); n++ } END { if (n) printf "%.1f", bps * 8 / 1e6 }'
+		awk 'NF == 4 && $4 > $2 { bps += ($3 - $1) / ($4 - $2); n++; if ($3 - $1 > 262144) moving++ }
+			END { if (n && !moving) print "stall"; else if (n) printf "%.1f", bps * 8 / 1e6 }'
 }
 
 speed_hello() {
@@ -1021,40 +1030,55 @@ speed_hello() {
 	wait "$pid"
 }
 
+# 数值且不低于 1 Mbps 才算测成功 (stall / fail / 0.x 都不算)
+speed_ok() { case "$1" in "" | fail | stall) return 1 ;; esac; awk -v v="$1" 'BEGIN { exit !(v + 0 >= 1) }'; }
+
 run_speed() {
-	local d="$1" nodes="$SPEED_NODES" n=0 done_groups=" " group carrier place hostport down up near name total
+	local d="$1" nodes="$SPEED_NODES" n=0 idx=0 group carrier place hostport down up near total cur="" best="" best_score=-1 score settled=0
 	[ "$IS_LINUX" = 1 ] || return 0
 	mkdir -p "$d/speed"
 	# 就近节点: Speedtest 按来源 IP 就近排序的公开列表, 取第一个, 代表这台机器本地的带宽
-	near=$(ccurl -s -m 10 https://www.speedtest.net/speedtest-servers-static.php 2>/dev/null | grep -oE '<server [^>]+>' | head -n1)
+	near=$(ccurl -s -m 10 https://www.speedtest.net/speedtest-servers-static.php 2>/dev/null | grep -oE '<server [^>]+>' | head -n3)
+	# 取最近的 3 个作同一组: 最近的那个有时自己限速 (2026-09-16 洛杉矶排到西雅图, 下载只有 9.7 Mbps)
 	if [ -n "$near" ]; then
-		name=$(printf '%s' "$near" | sed -E 's/.* name="([^"]*)".*/\1/' | tr -d '|')
-		hostport=$(printf '%s' "$near" | sed -E 's/.* host="([^"]*)".*/\1/')
-		nodes="near|near|$name|$hostport
+		nodes="$(printf '%s\n' "$near" | sed -E 's/.* name="([^"|]*)".* host="([^"]*)".*/near|near|\1|\2/; s/.* host="([^"]*)".* name="([^"|]*)".*/near|near|\2|\1/')
 $nodes"
 	fi
 	total=$(printf '%s\n' "$nodes" | cut -d'|' -f1 | sort -u | wc -l | tr -d ' ')
+	# 同组节点按顺序测, 上下行都正常且相差不到 5 倍就结束这一组; 否则换同组下一个:
+	# 连不上、能连上但不传数据 (2026-09-16 洛杉矶测上海联通下载为 0)、或某个方向被节点限速。
+	# 全组测完仍不理想时, 取上下行里较小值最大的一次; 都没有数值时, 受限 (stall) 好过连接失败。
 	while IFS='|' read -r group carrier place hostport; do
 		[ -n "$hostport" ] || continue
-		case "$done_groups" in *" $group "*) continue ;; esac
+		if [ "$group" != "$cur" ]; then
+			if [ -n "$cur" ]; then n=$((n + 1)); put "$d/speed" "sp_$n" "$best"; fi
+			cur=$group
+			best=""
+			best_score=-1
+			settled=0
+		fi
+		[ "$settled" = 1 ] && continue
 		progress "$(t "[网络] 带宽测速 $((n + 1))/$total…" "[Network] Bandwidth $((n + 1))/$total…")"
+		idx=$((idx + 1))
 		if ! speed_hello "$hostport" </dev/null; then
-			# 同组还有备用节点就换下一个; 组里最后一个也连不上才记失败
-			if printf '%s\n' "$nodes" | awk -F'|' -v g="$group" -v h="$hostport" 'f && $1 == g { found = 1 } $4 == h { f = 1 } END { exit !found }'; then continue; fi
-			n=$((n + 1))
-			put "$d/speed" "sp_$n" "$carrier|$place|fail|fail"
-			done_groups="$done_groups$group "
+			[ -n "$best" ] || best="$carrier|$place|fail|fail"
 			continue
 		fi
-		n=$((n + 1))
-		mkdir -p "$d/speed/$n"
-		down=$(speed_dir down "$hostport" "$d/speed/$n" </dev/null)
-		up=$(speed_dir up "$hostport" "$d/speed/$n" </dev/null)
-		put "$d/speed" "sp_$n" "$carrier|$place|${down:-fail}|${up:-fail}"
-		done_groups="$done_groups$group "
+		mkdir -p "$d/speed/$idx"
+		down=$(speed_dir down "$hostport" "$d/speed/$idx" </dev/null)
+		up=$(speed_dir up "$hostport" "$d/speed/$idx" </dev/null)
+		score=$(awk -v a="$down" -v b="$up" 'BEGIN { a += 0; b += 0; printf "%.1f", a < b ? a : b }')
+		if speed_ok "$down" && speed_ok "$up" && awk -v a="$down" -v b="$up" 'BEGIN { exit !(a * 5 >= b && b * 5 >= a) }'; then
+			best="$carrier|$place|$down|$up"
+			settled=1
+		elif awk -v s="$score" -v b="$best_score" 'BEGIN { exit !(s > b) }' || [ "${best%|fail|fail}" != "$best" ]; then
+			best="$carrier|$place|${down:-fail}|${up:-fail}"
+			best_score=$score
+		fi
 	done <<EOF
 $nodes
 EOF
+	if [ -n "$cur" ]; then n=$((n + 1)); put "$d/speed" "sp_$n" "$best"; fi
 }
 
 run_intl_latency() {
@@ -1063,11 +1087,14 @@ run_intl_latency() {
 	for item in $INTL_NODES; do
 		(
 			best=""
-			for i in 1 2 3 4; do
-				# 前 3 次都失败才补第 4 次, 间隔 1 秒
-				[ $i = 4 ] && { [ -n "$best" ] && break; sleep 1; }
-				s=$(connect_time "${item#*:}" 8080)
-				if positive "$s" && { [ -z "$best" ] || awk -v a="$s" -v b="$best" 'BEGIN { exit !(a < b) }'; }; then best=$s; fi
+			for host in $(printf '%s' "${item#*:}" | tr '|' ' '); do
+				for i in 1 2 3 4; do
+					# 前 3 次都失败才补第 4 次, 间隔 1 秒
+					[ $i = 4 ] && { [ -n "$best" ] && break; sleep 1; }
+					s=$(connect_time "$host" 8080)
+					if positive "$s" && { [ -z "$best" ] || awk -v a="$s" -v b="$best" 'BEGIN { exit !(a < b) }'; }; then best=$s; fi
+				done
+				[ -n "$best" ] && break
 			done
 			put "$d/intl" "il_${item%%:*}" "$([ -n "$best" ] && awk -v v="$best" 'BEGIN { printf "%.1f", v * 1000 }' || echo fail)"
 		) &
