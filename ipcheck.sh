@@ -5,7 +5,7 @@
 #   bash <(curl -Ls https://sh.cd)
 #   bash <(curl -Ls https://cleanip.io/ipcheck)        备用入口
 #
-# 在终端里运行会进入菜单, 一键全检按 硬件 → IP → 网络 的顺序, 每一项测完先显示结果再询问是否继续。
+# 在终端里运行会进入菜单, 一键全检按 硬件 → IP → 网络 的顺序一口气测完, 每一项测完立即显示结果, 最后一屏总览。
 # IP 情报与评分、BGP 信息来自 CleanIP; 硬件跑分、解锁、邮件端口、三网延迟与回程、测速都在本机实测,
 # 测完把结果提交给 CleanIP 排版成报告。
 #
@@ -31,7 +31,6 @@ JSON=0
 OPT_NOCOLOR=0
 DEEP=0
 AUTO_YES=0
-NO_ASK=0
 STAGES=""
 SKIP=","
 
@@ -48,7 +47,7 @@ Run without options in a terminal to open the menu.
   -H            Hardware & performance
   -I            IP quality
   -N            Network quality
-  -A            Everything, without prompts between sections
+  -A            Everything (same as menu option 1)
   -d            Deep mode: ATTO disk table, hop-by-hop routes
   -y            Install sysbench / fio without asking when missing
 
@@ -73,7 +72,7 @@ CleanIP ipcheck v$VERSION — 服务器全面体检: 硬件与性能 · IP 质�
   -H            硬件与性能
   -I            IP 质量
   -N            网络质量
-  -A            全部检测, 中间不询问
+  -A            一键全检 (同菜单第 1 项, 跳过菜单)
   -d            深度模式: 硬件 ATTO 块大小表、逐跳回程路由
   -y            缺少 sysbench / fio 时直接安装, 不询问
 
@@ -102,7 +101,7 @@ while getopts ":HINAdy46x:i:asS:jnl:Ehv" opt; do
 	H) add_stage hw ;;
 	I) add_stage ip ;;
 	N) add_stage net ;;
-	A) add_stage hw; add_stage ip; add_stage net; NO_ASK=1 ;;
+	A) add_stage hw; add_stage ip; add_stage net ;;
 	d) DEEP=1 ;;
 	y) AUTO_YES=1 ;;
 	4) ONLY_FAMILY=4 ;;
@@ -216,7 +215,7 @@ positive() { awk -v v="$1" 'BEGIN { exit !(v + 0 > 0) }'; }
 detect_virt() {
 	local v
 	if [ -f /.dockerenv ]; then echo docker; return; fi
-	v=$(tr '\0' '\n' </proc/1/environ 2>/dev/null | sed -n 's/^container=//p' | head -n1)
+	v=$(tr '\0' '\n' 2>/dev/null </proc/1/environ | sed -n 's/^container=//p' | head -n1)
 	if [ -n "$v" ]; then echo "$v"; return; fi
 	if [ -d /proc/vz ] && [ ! -d /proc/bc ]; then echo openvz; return; fi
 	if command -v systemd-detect-virt >/dev/null 2>&1; then
@@ -386,7 +385,7 @@ hw_collect_disk() {
 # ── 跑分工具: 缺 sysbench / fio 时询问安装 ────────────────────────────────
 
 ensure_bench_tools() {
-	local missing="" sudo="" ans pm
+	local missing="" sudo="" ans pm rc
 	[ "$IS_LINUX" = 1 ] || return 0
 	command -v sysbench >/dev/null 2>&1 || missing="$missing sysbench"
 	command -v fio >/dev/null 2>&1 || missing="$missing fio"
@@ -402,8 +401,11 @@ ensure_bench_tools() {
 		progress_done
 		printf '\n  %s%s%s %s\n' "$C_Y" "!" "$C_0" "$(t "缺少测试工具:$missing" "Missing benchmark tools:$missing")"
 		printf '    %s\n' "$(t "安装后才能测 CPU 跑分与硬盘读写; 不安装则用系统自带工具近似测量" "Needed for CPU scores and disk I/O; without them, rougher built-in measurements are used")"
-		printf '    %s [Y/n] ' "$(t "现在用 $pm 安装?" "Install with $pm now?")"
-		read -r ans </dev/tty || ans=n
+		printf '    %s [Y/n] ' "$(t "现在用 $pm 安装? 15 秒不回答默认安装" "Install with $pm now? Defaults to yes in 15 s")"
+		# 超时按默认 (安装) 继续, 一键全检无人值守时不卡在这里; 读不到终端才当作不安装
+		read -r -t 15 ans 2>/dev/null </dev/tty
+		rc=$?
+		if [ "$rc" -gt 128 ]; then ans=y; printf '\n'; elif [ "$rc" != 0 ]; then ans=n; fi
 		case "$ans" in n | N | no | No) return 0 ;; esac
 	fi
 	progress "$(t "安装$missing …" "Installing$missing …")"
@@ -1152,19 +1154,6 @@ stage_name() {
 	route) t "回程路由详情" "Hop-by-hop routes" ;;
 	esac
 }
-stage_desc() {
-	case "$1" in
-	hw) t "系统 · CPU · 内存 · 硬盘跑分 · 约 2 分钟" "System · CPU · memory · disk · about 2 min" ;;
-	ip) t "纯净度 · 解锁 · 邮件 · 黑名单 · 约 30 秒" "Purity · unlocks · mail · blacklists · about 30 s" ;;
-	net) t "BGP · 三网延迟与回程 · 测速 · 约 3 分钟" "BGP · China latency & routes · speed · about 3 min" ;;
-	route) t "逐跳位置与 ASN · 约 1 分钟" "Location and ASN per hop · about 1 min" ;;
-	esac
-}
-
-fmt_dur() {
-	local s="$1"
-	if [ "$s" -ge 60 ]; then t "$((s / 60)) 分 $((s % 60)) 秒" "$((s / 60))m $((s % 60))s"; else t "$s 秒" "${s}s"; fi
-}
 
 menu_select() {
 	local choice
@@ -1197,26 +1186,6 @@ menu_select() {
 	*) STAGES=" hw ip net" ;;
 	esac
 	printf '\n'
-}
-
-# 阶段之间询问, 结果放在 NEXT_ACTION: go | skip | quit
-ask_next() {
-	local next="$1" i key filled
-	NEXT_ACTION=go
-	printf '  %s%s%s  %s%s%s  %s%s%s\n' "$C_K" "$(t "下一项" "Next")" "$C_0" "$C_B" "$(stage_name "$next")" "$C_0" "$C_K" "$(stage_desc "$next")" "$C_0"
-	printf '  %s%sEnter%s %s    %s%ss%s %s    %s%sq%s %s\n' "$C_G" "$C_B" "$C_0" "$(t "继续" "continue")" "$C_G" "$C_B" "$C_0" "$(t "跳过这一项" "skip it")" "$C_G" "$C_B" "$C_0" "$(t "结束" "finish")"
-	for i in 8 7 6 5 4 3 2 1; do
-		filled=$((9 - i))
-		printf '\r\033[K  %s%s %s%s' "$C_K" "$(t "$i 秒后自动继续" "continuing in $i s")" "$(printf '%*s' "$filled" '' | tr ' ' '#' | sed 's/#/▰/g')$(printf '%*s' "$i" '' | tr ' ' '#' | sed 's/#/▱/g')" "$C_0"
-		if IFS= read -r -s -n 1 -t 1 key </dev/tty 2>/dev/null; then
-			case "$key" in
-			s | S) NEXT_ACTION=skip ;;
-			q | Q) NEXT_ACTION=quit ;;
-			esac
-			break
-		fi
-	done
-	printf '\r\033[K\n'
 }
 
 SEQ=1
@@ -1312,15 +1281,6 @@ while [ $# -gt 0 ]; do
 		fi
 		;;
 	esac
-
-	if [ $# -gt 0 ] && [ "$INTERACTIVE" = 1 ] && [ "$NO_ASK" = 0 ]; then
-		printf '\n  %s✓%s %s%s%s %s  %s%s%s\n' "$C_G" "$C_0" "$C_B" "$(stage_name "$stage")" "$C_0" "$(t "已完成" "done")" "$C_K" "$(t "用时" "took") $(fmt_dur $(($(date +%s) - start)))" "$C_0"
-		ask_next "$1"
-		case "$NEXT_ACTION" in
-		skip) shift ;;
-		quit) set -- ;;
-		esac
-	fi
 done
 
 # 跑了两项以上时出一屏总览

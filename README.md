@@ -12,7 +12,7 @@ bash <(curl -Ls https://sh.cd)
 bash <(curl -Ls https://cleanip.io/ipcheck)
 ```
 
-在终端里运行会进入菜单。一键全检按 **硬件 → IP → 网络** 的顺序进行，每一项测完先显示结果，再询问是否继续（8 秒不操作自动继续，按 `s` 跳过下一项，按 `q` 结束），最后给出一屏总览。
+在终端里运行会进入菜单。一键全检按 **硬件 → IP → 网络** 的顺序一口气测完，中途不需要操作，每一项测完立即显示结果，最后给出一屏总览。
 
 ## 检测内容
 
@@ -59,7 +59,7 @@ bash <(curl -Ls https://cleanip.io/ipcheck)
   -H            硬件与性能
   -I            IP 质量
   -N            网络质量
-  -A            全部检测, 中间不询问
+  -A            一键全检 (同菜单第 1 项, 跳过菜单)
   -d            深度模式: 硬件 ATTO 块大小表、逐跳回程路由
   -y            缺少 sysbench / fio 时直接安装, 不询问
 
@@ -79,7 +79,7 @@ bash <(curl -Ls https://cleanip.io/ipcheck)
 # 只看 IP 质量
 bash <(curl -Ls https://sh.cd) -I
 
-# 全部检测, 中间不询问, 缺工具时直接安装
+# 跳过菜单直接一键全检, 缺工具时直接安装
 bash <(curl -Ls https://sh.cd) -A -y
 
 # 检测代理出口的 IP 质量
@@ -94,7 +94,7 @@ bash <(curl -Ls https://sh.cd) -A -E -j > report.json
 ## 运行要求
 
 - bash 3.2 及以上与 curl；Linux 上检测最完整，macOS 可以跑 IP 质量和大部分网络检测
-- CPU / 内存跑分与硬盘读写需要 `sysbench`、`fio`。系统里没有时会先询问，同意才用系统的包管理器安装（需要 root 或免密 sudo）；不安装则用 openssl 与 dd 近似测量
+- CPU / 内存跑分与硬盘读写需要 `sysbench`、`fio`。系统里没有时开始前询问一次，同意（或 15 秒不回答）才用系统的包管理器安装（需要 root 或免密 sudo）；不安装则用 openssl 与 dd 近似测量
 - 除此之外不安装任何软件、不修改系统；硬盘测试在当前目录（不可写时换家目录等）写入临时文件，测完删除
 
 使用代理（`-x`）时，网络质量测的是本机而不是代理，所以会跳过；邮件端口检测也会跳过。
