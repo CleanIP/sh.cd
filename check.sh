@@ -2050,13 +2050,23 @@ stage_route() {
 	local d="$TMP/route"
 	mkdir -p "$d"
 	: >"$d/fields"
-	if [ "$DEEP" = 1 ] && [ -s "$TMP/net/route/fields" ]; then
-		# 全部检测: 网络阶段已按深度模式追踪过回程 (带每跳延迟), 直接复用, 不再追踪一遍; 不报用时 (报 0 秒会让人误解)
-		cat "$TMP/net/route/fields" >>"$d/fields"
-		cat "$TMP/net/routel/fields" >>"$d/fields" 2>/dev/null
-		cat "$TMP/net/edu/fields" >>"$d/fields" 2>/dev/null
-		cat "$TMP/net/edu6/fields" >>"$d/fields" 2>/dev/null
-		cat "$TMP/net/route6/fields" >>"$d/fields" 2>/dev/null
+	if [ -s "$TMP/net/route/fields" ]; then
+		# 网络阶段已经追踪过回程, 直接复用, 不再扫一遍 (全省 93 条要几分钟); 不报用时 (报 0 秒会让人误解)。
+		# 深度模式下网络阶段已经量过每跳延迟, 否则在这里补上。
+		for sub in route routel route6 edu edu6; do
+			[ -s "$TMP/net/$sub/fields" ] || continue
+			mkdir -p "$d/$sub"
+			cp "$TMP/net/$sub/fields" "$d/$sub/fields"
+			if [ "$DEEP" != 1 ]; then
+				progress "$(t "[网络] 补每跳延迟…" "[Network] Latency per hop…")"
+				case "$sub" in
+				*6) route_rtt "$d/$sub" / ;;
+				*) route_rtt "$d/$sub" : ;;
+				esac
+			fi
+		done
+		cat "$d"/*/fields >>"$d/fields" 2>/dev/null
+		DEEP=1
 		ROUTE_REUSED=1
 	else
 		set_net 4

@@ -30,6 +30,7 @@ New features and fixes in each release, newest first. Versions match the script'
 ### Fixed
 
 - Long latency lines in the summary wrap by display width instead of overflowing the report
+- Route details no longer re-probe: routes measured during the network stage are reused and only per-hop latency is added, saving minutes in menu 7 and all checks
 - With the bash that ships with macOS, some terminals showed the CLEAN IP banner as garbled, uncolored characters; the ATTO and speed test progress lines had the same problem
 - Provincial speed table shows "-" where a province has no server for a carrier instead of a blank cell
 - China and international latency exclude DNS lookup time and measure only the TCP handshake; on machines without a DNS cache a lookup takes from a fraction of a second to over two seconds, which inflated latency and could be mistaken for a retransmit
