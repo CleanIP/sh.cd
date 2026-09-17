@@ -2,6 +2,12 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.6.2 · 2026-09-18
+
+### Added
+
+- City latency: `-c` (included in all checks) measures 223 city-level nodes and lists median latency and loss per city, grouped by province
+
 ## v1.6.1 · 2026-09-18
 
 ### Added

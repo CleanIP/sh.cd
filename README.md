@@ -45,6 +45,7 @@ Geekbench 6（`-g`，全部检测默认包含）从 Geekbench 官方下载约 22
 | 本地策略 | NAT 类型（公网直连 / 防火墙 / 全锥形 NAT1 / 受限锥形 NAT2 / 端口限制锥形 NAT3 / 对称 NAT4）、TCP 拥塞控制与队列、收发缓冲区、IPv6 可用性 |
 | BGP 与接入 | ASN 注册信息与地址、路由与 RPKI、上游 / 对等 / 下游数量、IX 与机房数、主要上游 |
 | 三网延迟 | 全国 31 省电信 / 联通 / 移动的 TCP 延迟，每格 5 次采样的走势与中位数；有 IPv6 时加测三网 IPv6 延迟 |
+| 市级延迟 | `-c`（全部检测默认包含）：223 个市级节点，按省分组给出各市的延迟中位数与丢包 |
 | 三网回程线路 | 默认测北京、上海、广州三网回程，识别 CN2 GIA / CN2 GT / 163 / CTGNET / 9929 / 4837 / CUG / CMIN2 / CMI；有 IPv6 时 IPv6 回程也测；菜单 6 或全部检测（菜单 2 / `-A -d`）看逐跳位置、延迟与 ASN |
 | 全省回程 | 菜单 7 或 `-R`（全部检测默认包含）：31 省 × 三网共 93 条线路，每格给出线路类型、延迟中位数与丢包；同一批目标再用 1400 字节的大包测一遍（大包回程），有 IPv6 时 IPv6 回程也是全省 |
 | 教育网回程 | 随全省回程一起测：每省一所高校官网，IPv4 走 CERNET、IPv6 走 CERNET2，给出进教育网前最后经过的骨干网、延迟与丢包 |
@@ -68,6 +69,7 @@ Geekbench 6（`-g`，全部检测默认包含）从 Geekbench 官方下载约 22
   -g            Geekbench 6 跑分 (下载约 220 MB, 结果会公开上传到 Geekbench 官网)
   -p            国内分省测速 (多数节点拦截境外来源, 国内服务器上测得全)
   -R            全省回程: 31 省 × 三网 + 大包 + 教育网回程 (同菜单第 7 项)
+  -c            市级延迟: 223 个市级节点 (全部检测默认包含)
   -y            缺少检测工具时直接安装, 不询问
 
   -4 / -6       只检测 IPv4 或 IPv6 (IP 质量)
@@ -141,7 +143,7 @@ IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定�
 - NAT 类型：按 RFC 3489 向公共 STUN 服务器探测
 - CPU 跑分：[Geekbench 6](https://www.geekbench.com)（`-g`，由 Primate Labs 提供，结果公开在 Geekbench Browser）
 - 测速节点来自 Speedtest 的公开节点，国内节点与分省节点清单参考 [spiritLHLS/speedtest.net-CN-ID](https://github.com/spiritLHLS/speedtest.net-CN-ID) 与 [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT），逐个实测后选用；国际测速节点为 GSL Networks，国际延迟节点优先 GSL Networks 等机房节点，当地没有时用当地主要运营商的 Speedtest 节点
-- 三网延迟节点：zstatic 公共测试节点
+- 三网延迟与市级延迟节点：[Zstatic CDN 节点查询](https://www.zstaticcdn.com) 公开的省级与市级节点
 - 更新日志：[CHANGELOG.md](CHANGELOG.md) · https://sh.cd/changelog
 
 ## 仓库结构
