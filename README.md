@@ -112,6 +112,7 @@ IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定�
 - 回程线路的骨干网段与判定规则参考 [oneclickvirt/backtrace](https://github.com/oneclickvirt/backtrace)（Apache-2.0）
 - 测速节点来自 Speedtest 的公开节点，国内节点清单参考 [spiritLHLS/speedtest.net-CN-ID](https://github.com/spiritLHLS/speedtest.net-CN-ID) 与 [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT），逐个实测后选用；国际节点为 GSL Networks
 - 三网延迟节点：zstatic 公共测试节点
+- 更新日志：[CHANGELOG.md](CHANGELOG.md) · https://sh.cd/changelog
 
 ## 仓库结构
 
@@ -122,6 +123,8 @@ server/report.ts    按阶段解析脚本提交的字段, 调用 render/ 排版
 server/render/      终端报告排版: 硬件、IP、网络、回程判定、总览
 server/upstream.ts  IP 情报、DNS 出口、BGP 数据的获取
 server/landing.ts   浏览器打开 sh.cd 时的首页
+server/changelog.ts 更新日志页 https://sh.cd/changelog
+server/site.ts      官网各页共用的样式、顶栏与页脚
 server/sample.ts    首页的示例报告 (示例数据, 用线上同一套排版生成)
 assets/fonts/       首页字体 Ioskeley Mono (SIL OFL 1.1, 授权见 OFL.txt)
 tests/              排版与字段解析测试
@@ -139,6 +142,16 @@ SHCD_DUMP=1 bash check.sh -N                        # 只打印本机检测字�
 ```
 
 服务需要的环境变量见 `deploy/sh.cd.env.example`；发布用 `deploy/deploy.sh`，连接参数写在不进仓库的 `deploy/.env`。
+
+### 发版
+
+每次发布都要更新日志：
+
+1. 改 `check.sh` 里的 `VERSION`
+2. 在 `CHANGELOG.md` 与 `CHANGELOG.en.md` 最上面各加一段 `## v版本 · 日期`，分「新增 / 修复」（英文 Added / Fixed）列出改动
+3. `bun run check` 通过后运行 `deploy/deploy.sh`
+
+测试会核对：最新一段更新日志等于脚本版本、中英文两份的版本与日期一致，漏写日志发布脚本会停下。官网 https://sh.cd/changelog 直接读这两份文件。
 
 ## 许可
 
