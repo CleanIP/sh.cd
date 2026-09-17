@@ -15,10 +15,12 @@
 import { readFile, stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import { changelogPage, changelogText } from "./changelog"
+import { hitStats } from "./hits"
 import { landingPage } from "./landing"
 import { langOf } from "./render/base"
 import { handleReport, type Form } from "./report"
 import { loadResult, resultMarkdown, resultNotFoundPage, resultPage, resultText, startResultSweeper } from "./results"
+import { withHits } from "./site"
 import { dnsProbeStart } from "./upstream"
 
 const SCRIPT = resolve(import.meta.dir, "../check.sh")
@@ -37,6 +39,11 @@ async function script(): Promise<Response> {
     // 用户是 bash <(curl ...) 直接执行响应体的, 出错也要返回一段能跑的 shell
     return new Response("echo 'sh.cd 暂时不可用, 请稍后重试 / sh.cd is temporarily unavailable, please retry later' >&2\nexit 1\n", { status: 503, headers })
   }
+}
+
+/** 网页响应: 页脚的脚本运行次数在这里填 (页面本身有缓存) */
+function htmlPage(html: string, lang: ReturnType<typeof langOf>, headers: Record<string, string> = {}, status = 200): Response {
+  return new Response(withHits(html, lang, hitStats()), { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", ...headers } })
 }
 
 /** 表单解析: 同名字段 (各阶段的 dur) 合成数组 */
@@ -65,7 +72,7 @@ const server = Bun.serve({
         const lang = url.searchParams.has("lang")
           ? langOf(url.searchParams.get("lang"))
           : langOf((req.headers.get("accept-language") || "zh").startsWith("zh") ? "zh" : "en")
-        return new Response(landingPage(lang), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", vary: "Accept" } })
+        return htmlPage(landingPage(lang), lang, { vary: "Accept" })
       }
       return script()
     }
@@ -74,7 +81,7 @@ const server = Bun.serve({
       const lang = langOf(url.searchParams.get("lang") ?? ((req.headers.get("accept-language") || "zh").startsWith("zh") ? "zh" : "en"))
       const headers = { "cache-control": "no-cache", vary: "Accept" }
       if ((req.headers.get("accept") || "").includes("text/html") && !url.searchParams.has("raw")) {
-        return new Response(changelogPage(lang), { headers: { ...headers, "content-type": "text/html; charset=utf-8" } })
+        return htmlPage(changelogPage(lang), lang, headers)
       }
       return new Response(changelogText(lang), { headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
     }
@@ -90,13 +97,13 @@ const server = Bun.serve({
       const headers = { "cache-control": "no-cache", "x-robots-tag": "noindex, nofollow", vary: "Accept" }
       if (!r) {
         return html
-          ? new Response(resultNotFoundPage(lang, url.pathname), { status: 404, headers: { ...headers, "content-type": "text/html; charset=utf-8" } })
+          ? htmlPage(resultNotFoundPage(lang, url.pathname), lang, headers, 404)
           : new Response(lang === "zh" ? "结果不存在或已过期\n" : "Result not found or expired\n", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
       }
       if (result[2] === ".md") {
         return new Response(resultMarkdown(r), { headers: { ...headers, "content-type": "text/markdown; charset=utf-8", "content-disposition": `inline; filename="sh.cd-${r.id}.md"` } })
       }
-      if (html) return new Response(resultPage(r, lang), { headers: { ...headers, "content-type": "text/html; charset=utf-8" } })
+      if (html) return htmlPage(resultPage(r, lang), lang, headers)
       // 终端里看: curl / wget 默认带颜色, ?color=0 / 1 手动指定; .txt 始终不带颜色
       const ua = (req.headers.get("user-agent") || "").toLowerCase()
       const color = result[2] !== ".txt" && (url.searchParams.has("color") ? url.searchParams.get("color") === "1" : /^(curl|wget)\//.test(ua))

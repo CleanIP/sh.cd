@@ -248,6 +248,7 @@ footer { margin-top: var(--space-12); border-top: 1px solid var(--color-neutral-
 footer .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-6); padding-block: var(--space-6) var(--space-12); font-size: var(--text-sm); color: var(--color-neutral-500); }
 footer .copyright { display: inline-flex; align-items: center; gap: var(--space-2); }
 footer .copyright::before { content: ""; width: var(--space-3); height: var(--space-3); background: var(--color-primary); }
+footer .hits { color: var(--color-neutral-400); }
 footer .links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-6); }
 footer .footer-logo { display: inline-flex; }
 footer a:hover { color: var(--color-neutral-900); }
@@ -371,11 +372,25 @@ export function siteHeader(lang: Lang, page: Page, path?: string): string {
 </header>`
 }
 
+/**
+ * 页脚里的脚本运行次数占位: 首页与更新日志的 HTML 有缓存, 次数每次响应前再替换进去 (见 main.ts withHits)。
+ */
+export const HITS_SLOT = "<!--hits-->"
+
+export function withHits(html: string, lang: Lang, hits: { today: number, total: number }): string {
+  const n = (v: number) => v.toLocaleString("en-US")
+  const text = lang === "zh"
+    ? `脚本检测 今日 ${n(hits.today)} 次 · 累计 ${n(hits.total)} 次`
+    : `Script runs: ${n(hits.today)} today · ${n(hits.total)} total`
+  return html.replace(HITS_SLOT, escapeHtml(text))
+}
+
 export function siteFooter(lang: Lang): string {
   const c = CHROME[lang]
   return `<footer>
   <div class="wrap">
     <span class="copyright">© ${new Date().getFullYear()} sh.cd · v${VERSION} · MIT</span>
+    <span class="hits">${HITS_SLOT}</span>
     <div class="links">
       <a href="${href("changelog", lang)}">${c.nav.changelog}</a>
       <a href="https://github.com/CleanIP/sh.cd">${c.source}</a>
