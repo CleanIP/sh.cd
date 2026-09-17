@@ -149,7 +149,7 @@ const T = {
   natted: ["在 NAT 后", "Behind NAT"],
   natFail: ["未测出 (出站 UDP 可能被拦截)", "Unknown (outbound UDP may be blocked)"],
   cnSpeed: ["分省测速", "Provincial speed (China)"],
-  cnSpeedNote: ["国内 Speedtest 节点, 下载 / 上传 Mbps; 多数节点拦截境外来源", "Down / up Mbps; most servers block traffic from abroad"],
+  cnSpeedNote: ["下载 / 上传 Mbps · - 无节点 · 多数节点拦截境外来源", "Down / up Mbps · - no server · most block foreign traffic"],
   unreachable: ["不可达", "blocked"],
   exitIp: ["出口", "exit"],
   tcp: ["TCP", "TCP"],
@@ -387,7 +387,7 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
       if (!cells.length) continue
       const value = rtrim(CARRIERS.map((c) => {
         const cell = cells.find((x) => x.carrier === c)
-        if (!cell) return pad("", COL)
+        if (!cell) return paint(pad("-", COL), "gray")
         if (!cell.result) return paint(pad(L(T.unreachable), COL), "gray")
         return pad(`${v(cell.result.down)} / ${v(cell.result.up)}`, COL)
       }).join(""))

@@ -7,6 +7,7 @@ New features and fixes in each release, newest first. Versions match the script'
 ### Fixed
 
 - With the bash that ships with macOS, some terminals showed the CLEAN IP banner as garbled, uncolored characters; the ATTO and speed test progress lines had the same problem
+- Provincial speed table shows "-" where a province has no server for a carrier instead of a blank cell
 
 ## v1.3.0 · 2026-09-18
 

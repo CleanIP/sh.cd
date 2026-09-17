@@ -128,8 +128,9 @@ describe("网络: NAT / IPv6 / 分省测速", () => {
     expect(text).toContain("三网回程线路 · IPv6");
     expect(text).toMatch(/北京\s+163 普通\s+-\s+CMI 普通/);
     expect(text).toContain("分省测速");
-    expect(text).toMatch(/北京\s+624 \/ 845/);
-    expect(text).toMatch(/江苏\s+受限 \/ 687/);
+    expect(text).toMatch(/北京\s+-\s+624 \/ 845/);
+    expect(text).toMatch(/江苏\s+-\s+-\s+受限 \/ 687/);
+    expect(text).toContain("- 无节点");
     expect(text).toMatch(/四川\s+不可达/);
     expect(renderNet(createRenderer("zh", false), parseNet({ nt_nat: "blocked|" })!, null).join("\n")).toContain("UDP 不通");
     // IPv6 逐跳详情: 地址放不进 16 列时单独一行
