@@ -324,7 +324,10 @@ export function href(page: Page, lang: Lang, hash = "", path = PATHS[page]): str
   return `${path}${lang === "en" ? "?lang=en" : ""}${hash}`
 }
 
-export function pageHead(lang: Lang, page: Page, title: string, description: string, extraCss = "", opts: { path?: string, noindex?: boolean } = {}): string {
+// 访问统计 (analytics.cleanip.io), 目前只放首页
+const ANALYTICS = '<script defer src="https://analytics.cleanip.io/script.js" data-website-id="ee95bfe4-44e4-42d4-8660-f8dd98163bc9"></script>'
+
+export function pageHead(lang: Lang, page: Page, title: string, description: string, extraCss = "", opts: { path?: string, noindex?: boolean, analytics?: boolean } = {}): string {
   const url = `https://sh.cd${href(page, lang, "", opts.path)}`
   return `<!doctype html>
 <html lang="${CHROME[lang].htmlLang}">
@@ -344,7 +347,7 @@ ${opts.noindex ? '<meta name="robots" content="noindex, nofollow">' : `<link rel
 <link rel="preload" href="/fonts/IoskeleyMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#111827"/><rect x="5" y="3" width="6" height="10" fill="#35a952"/></svg>')}">
 <style>${SITE_CSS}${extraCss}</style>
-</head>`
+${opts.analytics ? `${ANALYTICS}\n` : ""}</head>`
 }
 
 export function siteHeader(lang: Lang, page: Page, path?: string): string {

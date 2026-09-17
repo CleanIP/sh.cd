@@ -271,7 +271,7 @@ export function landingPage(lang: Lang): string {
   const reports = sampleReports(lang)
   const order: SampleTab[] = ["summary", "hw", "ip", "net"]
 
-  const html = `${pageHead(lang, "home", t.title, t.description)}
+  const html = `${pageHead(lang, "home", t.title, t.description, "", { analytics: true })}
 <body>
 ${siteHeader(lang, "home")}
 
