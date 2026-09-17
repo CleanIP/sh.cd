@@ -95,7 +95,7 @@ const COPY: Record<Lang, Copy> = {
     options: [
       ["不带参数", "进入菜单；1 一键全检，2 全部检测"],
       ["-A", "跳过菜单，直接一键全检"],
-      ["-A -d", "全部检测：一键全检加深度模式、Geekbench、分省测速、全省回程与逐跳详情"],
+      ["-A -d", "全部检测：一键全检加深度模式、Geekbench、分省测速、全省回程、市级延迟与逐跳详情"],
       ["-H  -I  -N", "只测硬件与性能 / IP 质量 / 网络质量"],
       ["-d", "深度模式：硬盘 ATTO 表、回程每一跳的延迟"],
       ["-g", "Geekbench 6 跑分，结果会公开上传到 Geekbench 官网"],
@@ -172,7 +172,7 @@ const COPY: Record<Lang, Copy> = {
     options: [
       ["no options", "Open the menu: 1 full check-up, 2 all checks"],
       ["-A", "Skip the menu and run the full check-up"],
-      ["-A -d", "All checks: full check-up plus deep mode, Geekbench, provincial speed, routes for all provinces and hop details"],
+      ["-A -d", "All checks: full check-up plus deep mode, Geekbench, provincial and city tests, routes for all provinces and hop details"],
       ["-H  -I  -N", "Hardware / IP quality / network only"],
       ["-d", "Deep mode: ATTO table, latency per route hop"],
       ["-g", "Geekbench 6; results are uploaded publicly to Geekbench Browser"],

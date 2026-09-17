@@ -33,10 +33,15 @@ New features and fixes in each release, newest first. Versions match the script'
 - With the bash that ships with macOS, some terminals showed the CLEAN IP banner as garbled, uncolored characters; the ATTO and speed test progress lines had the same problem
 - Provincial speed table shows "-" where a province has no server for a carrier instead of a blank cell
 - China and international latency exclude DNS lookup time and measure only the TCP handshake; on machines without a DNS cache a lookup takes from a fraction of a second to over two seconds, which inflated latency and could be mistaken for a retransmit
+
 ## v1.2.0 · 2026-09-17
 
 ### Added
 
+- sh.cd is now a standalone service; the script, reports and website all live at https://sh.cd
+- New website: Ioskeley Mono typeface, a sample report in four tabs (summary / hardware / IP / network), a check list and copyable commands
+- CLEAN IP banner at the start of the script
+- Copyright notice in the website footer
 - All checks: menu option 2 or `-A -d` runs the full check-up plus the ATTO disk table, latency for every route hop, and hop-by-hop route details
 - IP addresses in reports show only the first two parts (e.g. `203.0.*.*`); matching ranges, NAT exit, reverse DNS and route hops are masked too, so screenshots are safe to share. JSON from `-j` keeps full data
 - The summary ends with the command `bash <(curl -Ls https://sh.cd)`
@@ -48,6 +53,12 @@ New features and fixes in each release, newest first. Versions match the script'
 
 ### Fixed
 
+- The full check-up no longer pauses between sections; missing sysbench / fio is asked about once before starting and installs by default after 15 s
+- Speed test switches to the next server in the group when one is unreachable, idle or throttled in one direction; the nearby server is chosen from the closest three
+- Backup server for Tokyo speed and latency
+- Uptime, memory size and Apple silicon extensions on macOS
+- Errors when detecting virtualization as non-root or on macOS
+- The mirror entry cleanip.io/ipcheck is removed; use https://sh.cd
 - China latency: handshakes that needed a retransmit (about 1 s extra) have the retransmit wait removed and count as loss, instead of showing latency over a second
 - Speed test: a direction below one tenth of the other is grayed out as throttled by the test server; the summary picks an overseas server when the nearby one is throttled in one direction
 - Mail handshakes wait up to 10 s and retry once, fixing false failures under concurrency
@@ -59,36 +70,7 @@ New features and fixes in each release, newest first. Versions match the script'
 - Memory throughput is no longer shown when sysbench is missing, as the fallback was inaccurate
 - Reverse DNS no longer repeats the IP when empty; BGP upstream names drop registry handles and quotes
 - Summary IP type is localized
-
-## v1.1.0 · 2026-09-17
-
-### Added
-
-- sh.cd is now a standalone service; the script, reports and website all live at https://sh.cd
-- New website: Ioskeley Mono typeface, a sample report in four tabs (summary / hardware / IP / network), a check list and copyable commands
-- CLEAN IP banner at the start of the script
-- Copyright notice in the website footer
-
-### Fixed
-
-- The full check-up no longer pauses between sections; missing sysbench / fio is asked about once before starting and installs by default after 15 s
-- Speed test switches to the next server in the group when one is unreachable, idle or throttled in one direction; the nearby server is chosen from the closest three
-- Backup server for Tokyo speed and latency
-- Uptime, memory size and Apple silicon extensions on macOS
-- Errors when detecting virtualization as non-root or on macOS
-- The mirror entry cleanip.io/ipcheck is removed; use https://sh.cd
-
 ## v1.0.0 · 2026-09-16
-
-### Added
-
-- Hardware & performance: OS and virtualization, CPU model and extensions, sysbench CPU / memory, fio 4K random and sequential disk I/O, ATTO table in deep mode
-- Network quality: NAT type and TCP settings, BGP upstreams and peers, latency to 31 Chinese provinces, return route detection for Beijing / Shanghai / Guangzhou, bandwidth tests, latency to 12 international sites
-- Hop-by-hop route details with location, ASN and latency
-- Menu: full check-up or hardware / IP / network alone, ending with a one-screen summary
-- macOS and ARM support
-
-## v0.2.0 · 2026-09-15
 
 ### Added
 
@@ -97,3 +79,8 @@ New features and fixes in each release, newest first. Versions match the script'
 - Outbound port 25 and handshakes with 12 mail providers
 - DNS egress check
 - An info page when sh.cd is opened in a browser
+- Hardware & performance: OS and virtualization, CPU model and extensions, sysbench CPU / memory, fio 4K random and sequential disk I/O, ATTO table in deep mode
+- Network quality: NAT type and TCP settings, BGP upstreams and peers, latency to 31 Chinese provinces, return route detection for Beijing / Shanghai / Guangzhou, bandwidth tests, latency to 12 international sites
+- Hop-by-hop route details with location, ASN and latency
+- Menu: full check-up or hardware / IP / network alone, ending with a one-screen summary
+- macOS and ARM support
