@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createRenderer, width } from "../server/render/base";
+import { CITY_NODES } from "../server/render/cities";
 import { PROVINCES } from "../server/render/local";
 import { parseNet, renderNet, renderRouteDetail } from "../server/render/net";
 
@@ -120,5 +121,35 @@ describe("教育网回程", () => {
     expect(detail).toContain("CERNET · IPv4");
     expect(detail).toContain("CERNET2 · IPv6");
     expect(detail).toContain("北京 教育网回程");
+  });
+});
+
+// 市级延迟: zstatic 的 223 个市级节点
+describe("市级延迟", () => {
+  const fields: Record<string, string> = {};
+  CITY_NODES.forEach(([key], i) => {
+    fields[`latc_${key}`] = i % 7 === 0 ? "0,0,0,0,0" : `${40 + (i % 90)}.1,${45 + (i % 90)}.2,${i % 5 === 0 ? 0 : 50 + (i % 90)}.3,${48 + (i % 90)}.4,${52 + (i % 90)}.5`;
+  });
+  const net = parseNet(fields)!;
+
+  test("223 个节点都能解析, 每个都有省份与城市名", () => {
+    expect(net.latencyCity).toHaveLength(CITY_NODES.length);
+    expect(new Set(net.latencyCity.map((x) => x.province)).size).toBeGreaterThanOrEqual(25);
+    for (const x of net.latencyCity) expect(x.zh).not.toBe("");
+  });
+
+  for (const lang of ["zh", "en"] as const) {
+    for (const color of [false, true]) {
+      test(`${lang} ${color ? "彩色" : "纯文本"} 不超过报告宽度`, () => assertWidth(renderNet(createRenderer(lang, color), net, null)));
+    }
+  }
+
+  test("按省分组, 超时与丢包标出来", () => {
+    const text = strip(renderNet(createRenderer("zh", false), net, null).join("\n"));
+    expect(text).toContain("市级延迟");
+    expect(text).toMatch(/\n  安徽\n/);
+    expect(text).toMatch(/合肥\s+\d+\s+\d+\s+\d+/);
+    expect(text).toMatch(/\n  台州\s/);
+    expect(text).toMatch(/×/);
   });
 });

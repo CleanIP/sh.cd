@@ -36,6 +36,7 @@ FULL=0
 GEEKBENCH=0
 CN_SPEED=0
 ROUTE_FULL=0
+CITY_LAT=0
 VIRT=""
 STAGES=""
 SKIP=","
@@ -59,6 +60,7 @@ Run without options in a terminal to open the menu.
   -g            Geekbench 6 (downloads about 220 MB; results are uploaded publicly to Geekbench Browser)
   -p            Speed tests to Chinese provincial servers (most block traffic from abroad)
   -R            Return routes for all 31 provinces x 3 carriers, plus large packets (menu 7)
+  -c            Latency to 223 city-level nodes (on top of the 31 provinces)
   -y            Install missing tools (sysbench, fio, …) without asking
 
   -4 / -6       IPv4 or IPv6 only (IP quality)
@@ -88,7 +90,8 @@ sh.cd v$VERSION — CleanIP 服务器全面体检: 硬件与性能 · IP 质量 
   -d            深度模式: 硬盘 ATTO 块大小表、回程每一跳的延迟
   -g            Geekbench 6 跑分 (下载约 220 MB, 结果会公开上传到 Geekbench 官网)
   -p            国内分省测速 (多数节点拦截境外来源, 国内服务器上测得全)
-  -R            全省回程: 31 省 × 三网的回程线路 + 大包回程 (同菜单第 7 项)
+  -R            全省回程: 31 省 × 三网 + 大包 + 教育网回程 (同菜单第 7 项)
+  -c            市级延迟: 在 31 省之外再测 223 个市级节点
   -y            缺少检测工具 (sysbench / fio 等) 时直接安装, 不询问
 
   -4 / -6       只检测 IPv4 或 IPv6 (IP 质量)
@@ -112,7 +115,7 @@ for a in "$@"; do case "$a" in -E | -len* | -lEN*) LANG_OPT=en ;; esac; done
 add_stage() { case " $STAGES " in *" $1 "*) ;; *) STAGES="$STAGES $1" ;; esac; }
 
 # -a / -s 是 v0.2 的参数 (全国延迟 / 测速), 现在网络质量默认就包含, 保留兼容
-while getopts ":HINAdgpRy46x:i:asS:jPnl:Ehv" opt; do
+while getopts ":HINAdgpRcy46x:i:asS:jPnl:Ehv" opt; do
 	case "$opt" in
 	H) add_stage hw ;;
 	I) add_stage ip ;;
@@ -122,6 +125,7 @@ while getopts ":HINAdgpRy46x:i:asS:jPnl:Ehv" opt; do
 	g) GEEKBENCH=1; add_stage hw ;;
 	p) CN_SPEED=1; add_stage net ;;
 	R) ROUTE_FULL=1; add_stage route ;;
+	c) CITY_LAT=1; add_stage net ;;
 	y) AUTO_YES=1 ;;
 	4) ONLY_FAMILY=4 ;;
 	6) ONLY_FAMILY=6 ;;
@@ -149,6 +153,7 @@ if [ "$FULL" = 1 ] && [ "$DEEP" = 1 ]; then
 	GEEKBENCH=1
 	CN_SPEED=1
 	ROUTE_FULL=1
+	CITY_LAT=1
 fi
 
 if ! command -v curl >/dev/null 2>&1; then
@@ -1039,6 +1044,7 @@ stage_ip_exit() {
 #   spc_<省>_<ct|cu|cm>=城市|下载Mbps|上传Mbps 或 fail   分省测速 (-p)
 #   rt_<省>_<运营商>=TTL:IP[:毫秒],…  回程逐跳 (全省模式是 31 省 × 三网)   rtl_* 大包回程   rt6_* IPv6
 #   rte_<省> / rte6_<省>=教育网回程逐跳   late_<省> / late6_<省>=到教育网节点的握手毫秒
+#   latc_<省>_<城市>_<运营商>=毫秒,… (5 次)   市级延迟 (-c)
 
 # ── 本地网络策略: NAT 类型 (纯 bash 发 STUN 请求)、TCP 拥塞控制与缓冲区 ──
 # bash 的 UDP 连接每次换源端口, 无法用同一端口问两台 STUN 服务器, 所以只区分「公网直连」与「在 NAT 后」。
@@ -1230,6 +1236,246 @@ run_latency() {
 			# 93 个节点分批并发, 同时发起太多连接会互相挤占, 测出来偏高
 			[ $((n % 18)) = 0 ] && wait
 		done
+	done
+	wait
+}
+
+# ── 市级延迟 (-c / 全部检测): zstatic 的市级节点, 223 个 (联通居多), 字段 latc_<省>_<城市>_<运营商> ─────
+# 清单 2026-09-18 取自 zstaticcdn.com 的公开节点查询, 逐个解析后按归属库核对过城市。
+CITY_NODES="
+ah_anqing_cu|ah-anqing-cu-v4.ip.zstaticcdn.com
+ah_bengbu_cu|ah-bengbu-cu-v4.ip.zstaticcdn.com
+ah_bozhou_cu|ah-bozhou-cu-v4.ip.zstaticcdn.com
+ah_hefei_cm|ah-hefei-cm-v4.ip.zstaticcdn.com
+ah_hefei_ct|ah-hefei-ct-v4.ip.zstaticcdn.com
+ah_hefei_cu|ah-hefei-cu-v4.ip.zstaticcdn.com
+ah_suzhou_cu|ah-suzhou-cu-v4.ip.zstaticcdn.com
+ah_wuhu_ct|ah-wuhu-ct-v4.ip.zstaticcdn.com
+fj_fuzhou_ct|fj-fuzhou-ct-v4.ip.zstaticcdn.com
+fj_longyan_cu|fj-longyan-cu-v4.ip.zstaticcdn.com
+fj_nanping_cu|fj-nanping-cu-v4.ip.zstaticcdn.com
+fj_ningde_cu|fj-ningde-cu-v4.ip.zstaticcdn.com
+fj_putian_cu|fj-putian-cu-v4.ip.zstaticcdn.com
+fj_quanzhou_cu|fj-quanzhou-cu-v4.ip.zstaticcdn.com
+fj_sanming_cu|fj-sanming-cu-v4.ip.zstaticcdn.com
+fj_xiamen_cu|fj-xiamen-cu-v4.ip.zstaticcdn.com
+fj_zhangzhou_cu|fj-zhangzhou-cu-v4.ip.zstaticcdn.com
+gd_chaozhou_cu|gd-chaozhou-cu-v4.ip.zstaticcdn.com
+gd_dongguan_cm|gd-dongguan-cm-v4.ip.zstaticcdn.com
+gd_dongguan_cu|gd-dongguan-cu-v4.ip.zstaticcdn.com
+gd_foshan_cu|gd-foshan-cu-v4.ip.zstaticcdn.com
+gd_guangzhou_cm|gd-guangzhou-cm-v4.ip.zstaticcdn.com
+gd_guangzhou_ct|gd-guangzhou-ct-v4.ip.zstaticcdn.com
+gd_guangzhou_cu|gd-guangzhou-cu-v4.ip.zstaticcdn.com
+gd_heyuan_cu|gd-heyuan-cu-v4.ip.zstaticcdn.com
+gd_huizhou_cu|gd-huizhou-cu-v4.ip.zstaticcdn.com
+gd_jiangmen_cu|gd-jiangmen-cu-v4.ip.zstaticcdn.com
+gd_jieyang_ct|gd-jieyang-ct-v4.ip.zstaticcdn.com
+gd_maoming_cu|gd-maoming-cu-v4.ip.zstaticcdn.com
+gd_shantou_cu|gd-shantou-cu-v4.ip.zstaticcdn.com
+gd_shanwei_cu|gd-shanwei-cu-v4.ip.zstaticcdn.com
+gd_shaoguan_cu|gd-shaoguan-cu-v4.ip.zstaticcdn.com
+gd_shenzhen_ct|gd-shenzhen-ct-v4.ip.zstaticcdn.com
+gd_yangjiang_cu|gd-yangjiang-cu-v4.ip.zstaticcdn.com
+gd_yunfu_cu|gd-yunfu-cu-v4.ip.zstaticcdn.com
+gd_zhanjiang_cu|gd-zhanjiang-cu-v4.ip.zstaticcdn.com
+gd_zhaoqing_cu|gd-zhaoqing-cu-v4.ip.zstaticcdn.com
+gd_zhongshan_cu|gd-zhongshan-cu-v4.ip.zstaticcdn.com
+gd_zhuhai_cu|gd-zhuhai-cu-v4.ip.zstaticcdn.com
+gs_lanzhou_ct|gs-lanzhou-ct-v4.ip.zstaticcdn.com
+gs_qingyang_ct|gs-qingyang-ct-v4.ip.zstaticcdn.com
+gs_zhongwei_ct|gs-zhongwei-ct-v4.ip.zstaticcdn.com
+gx_guilin_cu|gx-guilin-cu-v4.ip.zstaticcdn.com
+gx_liuzhou_cu|gx-liuzhou-cu-v4.ip.zstaticcdn.com
+gx_nanning_cu|gx-nanning-cu-v4.ip.zstaticcdn.com
+gz_guiyang_cm|gz-guiyang-cm-v4.ip.zstaticcdn.com
+gz_guiyang_cu|gz-guiyang-cu-v4.ip.zstaticcdn.com
+ha_anyang_cu|ha-anyang-cu-v4.ip.zstaticcdn.com
+ha_hebi_cu|ha-hebi-cu-v4.ip.zstaticcdn.com
+ha_jiaozuo_cu|ha-jiaozuo-cu-v4.ip.zstaticcdn.com
+ha_jiyuan_cu|ha-jiyuan-cu-v4.ip.zstaticcdn.com
+ha_kaifeng_cu|ha-kaifeng-cu-v4.ip.zstaticcdn.com
+ha_luohe_cu|ha-luohe-cu-v4.ip.zstaticcdn.com
+ha_luoyang_cu|ha-luoyang-cu-v4.ip.zstaticcdn.com
+ha_nanyang_cu|ha-nanyang-cu-v4.ip.zstaticcdn.com
+ha_pingdingshan_cu|ha-pingdingshan-cu-v4.ip.zstaticcdn.com
+ha_sanmenxia_cu|ha-sanmenxia-cu-v4.ip.zstaticcdn.com
+ha_shangqiu_cu|ha-shangqiu-cu-v4.ip.zstaticcdn.com
+ha_xinxiang_cu|ha-xinxiang-cu-v4.ip.zstaticcdn.com
+ha_xinyang_cu|ha-xinyang-cu-v4.ip.zstaticcdn.com
+ha_xuchang_cu|ha-xuchang-cu-v4.ip.zstaticcdn.com
+ha_zhengzhou_cm|ha-zhengzhou-cm-v4.ip.zstaticcdn.com
+ha_zhengzhou_ct|ha-zhengzhou-ct-v4.ip.zstaticcdn.com
+ha_zhoukou_cu|ha-zhoukou-cu-v4.ip.zstaticcdn.com
+ha_zhumadian_cu|ha-zhumadian-cu-v4.ip.zstaticcdn.com
+hb_ezhou_cu|hb-ezhou-cu-v4.ip.zstaticcdn.com
+hb_huanggang_cu|hb-huanggang-cu-v4.ip.zstaticcdn.com
+hb_huangshi_cu|hb-huangshi-cu-v4.ip.zstaticcdn.com
+hb_jingmen_cu|hb-jingmen-cu-v4.ip.zstaticcdn.com
+hb_jingzhou_cu|hb-jingzhou-cu-v4.ip.zstaticcdn.com
+hb_shiyan_cu|hb-shiyan-cu-v4.ip.zstaticcdn.com
+hb_suizhou_cu|hb-suizhou-cu-v4.ip.zstaticcdn.com
+hb_wuhan_ct|hb-wuhan-ct-v4.ip.zstaticcdn.com
+hb_xiangyang_ct|hb-xiangyang-ct-v4.ip.zstaticcdn.com
+hb_xiaogan_ct|hb-xiaogan-ct-v4.ip.zstaticcdn.com
+hb_yichang_ct|hb-yichang-ct-v4.ip.zstaticcdn.com
+he_baoding_cu|he-baoding-cu-v4.ip.zstaticcdn.com
+he_cangzhou_cu|he-cangzhou-cu-v4.ip.zstaticcdn.com
+he_chengde_cu|he-chengde-cu-v4.ip.zstaticcdn.com
+he_handan_cu|he-handan-cu-v4.ip.zstaticcdn.com
+he_hengshui_cu|he-hengshui-cu-v4.ip.zstaticcdn.com
+he_langfang_cu|he-langfang-cu-v4.ip.zstaticcdn.com
+he_shijiazhuang_cu|he-shijiazhuang-cu-v4.ip.zstaticcdn.com
+he_tangshan_cu|he-tangshan-cu-v4.ip.zstaticcdn.com
+he_xingtai_cu|he-xingtai-cu-v4.ip.zstaticcdn.com
+he_xiongan_ct|he-xiongan-ct-v4.ip.zstaticcdn.com
+hi_haikou_ct|hi-haikou-ct-v4.ip.zstaticcdn.com
+hl_daqing_cu|hl-daqing-cu-v4.ip.zstaticcdn.com
+hl_daxinganling_cu|hl-daxinganling-cu-v4.ip.zstaticcdn.com
+hl_haerbin_cu|hl-haerbin-cu-v4.ip.zstaticcdn.com
+hl_hegang_cu|hl-hegang-cu-v4.ip.zstaticcdn.com
+hl_heihe_cu|hl-heihe-cu-v4.ip.zstaticcdn.com
+hl_jiamusi_cu|hl-jiamusi-cu-v4.ip.zstaticcdn.com
+hl_jixi_cu|hl-jixi-cu-v4.ip.zstaticcdn.com
+hl_mudanjiang_cu|hl-mudanjiang-cu-v4.ip.zstaticcdn.com
+hl_qiqihaer_cu|hl-qiqihaer-cu-v4.ip.zstaticcdn.com
+hl_qitaihe_cu|hl-qitaihe-cu-v4.ip.zstaticcdn.com
+hl_shuangyashan_cu|hl-shuangyashan-cu-v4.ip.zstaticcdn.com
+hl_suihua_cu|hl-suihua-cu-v4.ip.zstaticcdn.com
+hl_yichun_cu|hl-yichun-cu-v4.ip.zstaticcdn.com
+hn_changsha_ct|hn-changsha-ct-v4.ip.zstaticcdn.com
+hn_changsha_cu|hn-changsha-cu-v4.ip.zstaticcdn.com
+hn_chenzhou_ct|hn-chenzhou-ct-v4.ip.zstaticcdn.com
+hn_hengyang_cu|hn-hengyang-cu-v4.ip.zstaticcdn.com
+hn_huaihua_ct|hn-huaihua-ct-v4.ip.zstaticcdn.com
+hn_loudi_cu|hn-loudi-cu-v4.ip.zstaticcdn.com
+hn_shaoyang_cu|hn-shaoyang-cu-v4.ip.zstaticcdn.com
+hn_xiangtan_cu|hn-xiangtan-cu-v4.ip.zstaticcdn.com
+hn_xiangxi_cu|hn-xiangxi-cu-v4.ip.zstaticcdn.com
+hn_yongzhou_ct|hn-yongzhou-ct-v4.ip.zstaticcdn.com
+hn_zhangjiajie_cu|hn-zhangjiajie-cu-v4.ip.zstaticcdn.com
+hn_zhuzhou_cm|hn-zhuzhou-cm-v4.ip.zstaticcdn.com
+hn_zhuzhou_ct|hn-zhuzhou-ct-v4.ip.zstaticcdn.com
+jl_changchun_cu|jl-changchun-cu-v4.ip.zstaticcdn.com
+jl_jilin_cu|jl-jilin-cu-v4.ip.zstaticcdn.com
+jl_siping_cu|jl-siping-cu-v4.ip.zstaticcdn.com
+jl_songyuan_cu|jl-songyuan-cu-v4.ip.zstaticcdn.com
+jl_tonghua_cu|jl-tonghua-cu-v4.ip.zstaticcdn.com
+js_lianyungang_cu|js-lianyungang-cu-v4.ip.zstaticcdn.com
+js_nanjing_cm|js-nanjing-cm-v4.ip.zstaticcdn.com
+js_nanjing_ct|js-nanjing-ct-v4.ip.zstaticcdn.com
+js_nanjing_cu|js-nanjing-cu-v4.ip.zstaticcdn.com
+js_nantong_cu|js-nantong-cu-v4.ip.zstaticcdn.com
+js_suzhou_cm|js-suzhou-cm-v4.ip.zstaticcdn.com
+js_suzhou_ct|js-suzhou-ct-v4.ip.zstaticcdn.com
+js_taizhou_cu|js-taizhou-cu-v4.ip.zstaticcdn.com
+js_wuxi_cm|js-wuxi-cm-v4.ip.zstaticcdn.com
+js_xuzhou_cu|js-xuzhou-cu-v4.ip.zstaticcdn.com
+js_yancheng_cu|js-yancheng-cu-v4.ip.zstaticcdn.com
+js_yangzhou_cu|js-yangzhou-cu-v4.ip.zstaticcdn.com
+js_zhenjiang_ct|js-zhenjiang-ct-v4.ip.zstaticcdn.com
+jx_fuzhou_cu|jx-fuzhou-cu-v4.ip.zstaticcdn.com
+jx_jian_cu|jx-jian-cu-v4.ip.zstaticcdn.com
+jx_jingdezhen_cu|jx-jingdezhen-cu-v4.ip.zstaticcdn.com
+jx_jiujiang_cu|jx-jiujiang-cu-v4.ip.zstaticcdn.com
+jx_nanchang_cu|jx-nanchang-cu-v4.ip.zstaticcdn.com
+jx_shangrao_cu|jx-shangrao-cu-v4.ip.zstaticcdn.com
+jx_xinyu_cu|jx-xinyu-cu-v4.ip.zstaticcdn.com
+jx_yichun_cu|jx-yichun-cu-v4.ip.zstaticcdn.com
+jx_yingtan_cu|jx-yingtan-cu-v4.ip.zstaticcdn.com
+ln_chaoyang_cu|ln-chaoyang-cu-v4.ip.zstaticcdn.com
+ln_dalian_cu|ln-dalian-cu-v4.ip.zstaticcdn.com
+ln_dandong_cu|ln-dandong-cu-v4.ip.zstaticcdn.com
+ln_fushun_cu|ln-fushun-cu-v4.ip.zstaticcdn.com
+ln_fuxin_cu|ln-fuxin-cu-v4.ip.zstaticcdn.com
+ln_huludao_cu|ln-huludao-cu-v4.ip.zstaticcdn.com
+ln_jinzhou_cu|ln-jinzhou-cu-v4.ip.zstaticcdn.com
+ln_liaoyang_ct|ln-liaoyang-ct-v4.ip.zstaticcdn.com
+ln_shenyang_cu|ln-shenyang-cu-v4.ip.zstaticcdn.com
+ln_tieling_cu|ln-tieling-cu-v4.ip.zstaticcdn.com
+ln_yingkou_cu|ln-yingkou-cu-v4.ip.zstaticcdn.com
+nm_baotou_cu|nm-baotou-cu-v4.ip.zstaticcdn.com
+nm_bayannaoer_cu|nm-bayannaoer-cu-v4.ip.zstaticcdn.com
+nm_chifeng_cu|nm-chifeng-cu-v4.ip.zstaticcdn.com
+nm_huhehaote_cm|nm-huhehaote-cm-v4.ip.zstaticcdn.com
+nm_huhehaote_ct|nm-huhehaote-ct-v4.ip.zstaticcdn.com
+nm_huhehaote_cu|nm-huhehaote-cu-v4.ip.zstaticcdn.com
+nm_hulunbeier_cu|nm-hulunbeier-cu-v4.ip.zstaticcdn.com
+nm_tongliao_cu|nm-tongliao-cu-v4.ip.zstaticcdn.com
+nm_wuhai_cu|nm-wuhai-cu-v4.ip.zstaticcdn.com
+nm_wulanchabu_cu|nm-wulanchabu-cu-v4.ip.zstaticcdn.com
+nm_xilinguole_cu|nm-xilinguole-cu-v4.ip.zstaticcdn.com
+nm_xingan_cu|nm-xingan-cu-v4.ip.zstaticcdn.com
+nx_yinchuan_cu|nx-yinchuan-cu-v4.ip.zstaticcdn.com
+qh_xining_cu|qh-xining-cu-v4.ip.zstaticcdn.com
+sc_chengdu_cm|sc-chengdu-cm-v4.ip.zstaticcdn.com
+sc_dazhou_cu|sc-dazhou-cu-v4.ip.zstaticcdn.com
+sc_leshan_cu|sc-leshan-cu-v4.ip.zstaticcdn.com
+sc_liangshan_cu|sc-liangshan-cu-v4.ip.zstaticcdn.com
+sc_luzhou_cu|sc-luzhou-cu-v4.ip.zstaticcdn.com
+sc_mianyang_cu|sc-mianyang-cu-v4.ip.zstaticcdn.com
+sc_neijiang_cu|sc-neijiang-cu-v4.ip.zstaticcdn.com
+sc_ziyang_cu|sc-ziyang-cu-v4.ip.zstaticcdn.com
+sd_binzhou_cu|sd-binzhou-cu-v4.ip.zstaticcdn.com
+sd_dongying_cu|sd-dongying-cu-v4.ip.zstaticcdn.com
+sd_heze_cu|sd-heze-cu-v4.ip.zstaticcdn.com
+sd_jinan_cm|sd-jinan-cm-v4.ip.zstaticcdn.com
+sd_jining_cu|sd-jining-cu-v4.ip.zstaticcdn.com
+sd_linyi_cu|sd-linyi-cu-v4.ip.zstaticcdn.com
+sd_qingdao_ct|sd-qingdao-ct-v4.ip.zstaticcdn.com
+sd_taian_cu|sd-taian-cu-v4.ip.zstaticcdn.com
+sd_weifang_cu|sd-weifang-cu-v4.ip.zstaticcdn.com
+sd_weihai_cu|sd-weihai-cu-v4.ip.zstaticcdn.com
+sd_yantai_cu|sd-yantai-cu-v4.ip.zstaticcdn.com
+sd_zaozhuang_cu|sd-zaozhuang-cu-v4.ip.zstaticcdn.com
+sd_zibo_cu|sd-zibo-cu-v4.ip.zstaticcdn.com
+sn_ankang_cu|sn-ankang-cu-v4.ip.zstaticcdn.com
+sn_baoji_cu|sn-baoji-cu-v4.ip.zstaticcdn.com
+sn_shangluo_cu|sn-shangluo-cu-v4.ip.zstaticcdn.com
+sn_weinan_cu|sn-weinan-cu-v4.ip.zstaticcdn.com
+sn_xian_cm|sn-xian-cm-v4.ip.zstaticcdn.com
+sn_xian_ct|sn-xian-ct-v4.ip.zstaticcdn.com
+sn_xianyang_cu|sn-xianyang-cu-v4.ip.zstaticcdn.com
+sn_yulin_cu|sn-yulin-cu-v4.ip.zstaticcdn.com
+sx_changzhi_cu|sx-changzhi-cu-v4.ip.zstaticcdn.com
+sx_jinzhong_cu|sx-jinzhong-cu-v4.ip.zstaticcdn.com
+sx_linfen_cu|sx-linfen-cu-v4.ip.zstaticcdn.com
+sx_lvliang_cu|sx-lvliang-cu-v4.ip.zstaticcdn.com
+sx_shuozhou_cu|sx-shuozhou-cu-v4.ip.zstaticcdn.com
+sx_taiyuan_ct|sx-taiyuan-ct-v4.ip.zstaticcdn.com
+sx_yangquan_cu|sx-yangquan-cu-v4.ip.zstaticcdn.com
+sx_yuncheng_cu|sx-yuncheng-cu-v4.ip.zstaticcdn.com
+xj_bayinguoleng_cu|xj-bayinguoleng-cu-v4.ip.zstaticcdn.com
+xj_hami_cu|xj-hami-cu-v4.ip.zstaticcdn.com
+xj_hetian_cu|xj-hetian-cu-v4.ip.zstaticcdn.com
+xj_shihezi_cu|xj-shihezi-cu-v4.ip.zstaticcdn.com
+xj_tulufan_cu|xj-tulufan-cu-v4.ip.zstaticcdn.com
+xj_wulumuqi_ct|xj-wulumuqi-ct-v4.ip.zstaticcdn.com
+xz_lasa_ct|xz-lasa-ct-v4.ip.zstaticcdn.com
+yn_dehong_cu|yn-dehong-cu-v4.ip.zstaticcdn.com
+yn_kunming_cu|yn-kunming-cu-v4.ip.zstaticcdn.com
+yn_puer_cu|yn-puer-cu-v4.ip.zstaticcdn.com
+yn_qujing_cu|yn-qujing-cu-v4.ip.zstaticcdn.com
+yn_xishuangbanna_cu|yn-xishuangbanna-cu-v4.ip.zstaticcdn.com
+zj_hangzhou_ct|zj-hangzhou-ct-v4.ip.zstaticcdn.com
+zj_huzhou_cu|zj-huzhou-cu-v4.ip.zstaticcdn.com
+zj_jiaxing_cu|zj-jiaxing-cu-v4.ip.zstaticcdn.com
+zj_jinhua_cu|zj-jinhua-cu-v4.ip.zstaticcdn.com
+zj_lishui_cu|zj-lishui-cu-v4.ip.zstaticcdn.com
+zj_ningbo_cm|zj-ningbo-cm-v4.ip.zstaticcdn.com
+zj_shaoxing_cu|zj-shaoxing-cu-v4.ip.zstaticcdn.com
+zj_taizhou_ct|zj-taizhou-ct-v4.ip.zstaticcdn.com
+zj_wenzhou_cu|zj-wenzhou-cu-v4.ip.zstaticcdn.com
+"
+
+run_latency_city() {
+	local d="$1" line key host n=0
+	mkdir -p "$d/latc"
+	printf '%s\n' "$CITY_NODES" | while IFS='|' read -r key host; do
+		[ -n "$host" ] || continue
+		(put "$d/latc" "latc_$key" "$(lat_node "$host")") &
+		n=$((n + 1))
+		[ $((n % 18)) = 0 ] && wait
 	done
 	wait
 }
@@ -1757,6 +2003,10 @@ stage_net() {
 	if ! skipped latency; then
 		progress "$(t "[网络] 三网延迟 (31 省)…" "[Network] China latency (31 provinces)…")"
 		run_latency "$d"
+		if [ "$CITY_LAT" = 1 ]; then
+			progress "$(t "[网络] 市级延迟 (223 个节点)…" "[Network] City latency (223 nodes)…")"
+			run_latency_city "$d"
+		fi
 		if [ "$NET_V6" = yes ]; then
 			progress "$(t "[网络] 三网延迟 IPv6…" "[Network] China latency over IPv6…")"
 			set_net 6
@@ -1898,6 +2148,7 @@ menu_select() {
 		GEEKBENCH=1
 		CN_SPEED=1
 		ROUTE_FULL=1
+		CITY_LAT=1
 		;;
 	3) STAGES=" hw" ;;
 	4) STAGES=" ip" ;;

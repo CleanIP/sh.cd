@@ -2,6 +2,7 @@
 // 以及「回程路由详情」(逐跳位置与 ASN)。字段格式见 check.sh 的「三、网络质量」段注释。
 
 import { pad, W, width, type Pair, type Renderer, type Tone } from "./base"
+import { CITY_NODES } from "./cities"
 import { PROVINCES, ROUTE_CITIES } from "./local"
 import { classifyEdu, classifyRoute, hopAsn, type Carrier, type RouteHop } from "./route"
 import { fit, fmtMbps, median, num, rowsFlex, rtrim, rttSamples, spark, str, textParts, wrap } from "./util"
@@ -43,6 +44,8 @@ export interface NetData {
   v6: boolean | null
   latency: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
   latency6: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
+  /** 市级延迟 (-c): zstatic 的 223 个市级节点 */
+  latencyCity: Array<{ key: string, province: string, carrier: Carrier, zh: string, en: string, samples: Array<number | null> }>
   routes: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
   /** 大包回程 (-R): 同一批目标改发 1400 字节的包再扫一遍 */
   routesLarge: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
@@ -84,9 +87,9 @@ const IPV4 = String.raw`(?:\d{1,3}\.){3}\d{1,3}`
 
 export function parseNet(body: Record<string, unknown>): NetData | null {
   const keys = Object.keys(body)
-  if (!keys.some((k) => /^(nt_|lat6?_|late6?_|rtl?6?_|rte6?_|sp_|spc_|il_)/.test(k))) return null
+  if (!keys.some((k) => /^(nt_|latc?6?_|late6?_|rtl?6?_|rte6?_|sp_|spc_|il_)/.test(k))) return null
   const data: NetData = {
-    nat: null, tcp: null, v6: null, latency: [], latency6: [], routes: [], routesLarge: [], edu: [], routes6: [], speed: [], speedCn: [], intl: [],
+    nat: null, tcp: null, v6: null, latency: [], latency6: [], latencyCity: [], routes: [], routesLarge: [], edu: [], routes6: [], speed: [], speedCn: [], intl: [],
     deep: body.deep === "1", dur: num(str(body.dur)),
   }
 
@@ -105,6 +108,12 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
         list.push({ province: prov, carrier, samples: v.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) })
       }
     }
+  }
+
+  for (const [key, province, carrier, zh, en] of CITY_NODES) {
+    const v = str(body[`latc_${key}`])
+    if (!/^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4}$/.test(v)) continue
+    data.latencyCity.push({ key, province, carrier, zh, en, samples: v.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) })
   }
 
   // IPv4 跳点 TTL:IP[:毫秒]; IPv6 地址本身带冒号, 用斜杠 TTL/IP[/毫秒]
@@ -218,6 +227,8 @@ const T = {
   peering: ["接入", "Peering"],
   upstream: ["上游", "Upstreams"],
   latency: ["三网延迟", "China carrier latency"],
+  latencyCity: ["市级延迟", "City latency"],
+  latencyCityNote: ["各市三网节点的中位数与丢包, 只列测到的", "Median and loss per city node; answered nodes only"],
   latencyNote: ["TCP 握手 5 次, 走势 + 中位数 ms, × 为超时, 重传计入丢包", "5 TCP handshakes: trend + median ms, × = timeout"],
   avg: ["平均", "Average"],
   ct: ["电信", "Telecom"],
@@ -378,6 +389,34 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   }
   latencyTable(net.latency, L(T.latency))
   latencyTable(net.latency6, `${L(T.latency)} · IPv6`)
+
+  // —— 市级延迟 (-c): 按省分组, 一行一个城市 ——
+  if (net.latencyCity.length) {
+    const LABEL = zh ? 10 : 13
+    const CELL = 9
+    out.push(`  ${paint(L(T.latencyCity), "bold")}`, `  ${paint(L(T.latencyCityNote), "gray")}`)
+    out.push(`  ${pad("", LABEL)}${paint(CARRIERS.map((c) => pad(L(T[c]), CELL)).join(" ").trimEnd(), "gray")}`)
+    for (const [code, pzh, pen] of PROVINCES) {
+      const rows = net.latencyCity.filter((x) => x.province === code)
+      if (!rows.length) continue
+      out.push(`  ${paint(zh ? pzh : pen, "gray")}`)
+      for (const city of [...new Set(rows.map((x) => x.key.split("_")[1]!))]) {
+        const group = rows.filter((x) => x.key.split("_")[1] === city)
+        const value = rtrim(CARRIERS.map((c) => {
+          const r = group.find((x) => x.carrier === c)
+          if (!r) return pad("", CELL)
+          const s2 = rttSamples(r.samples)
+          const med = median(s2.values.filter((x): x is number => x !== null))
+          const loss = Math.round((s2.lost / s2.values.length) * 100)
+          const msText = med === null ? padL("×", 5) : padL(String(Math.round(med)), 5)
+          return (med === null ? tonePaint(msText, "bad") : paint(msText, "bold"))
+            + (loss ? tonePaint(padL(`${loss}%`, 4), loss > 20 ? "bad" : "warn") : paint(padL("", 4), "gray"))
+        }).join(" "))
+        out.push(`  ${pad(fit(zh ? group[0]!.zh : group[0]!.en, LABEL - 1), LABEL)}${value}`)
+      }
+    }
+    out.push(hr())
+  }
 
   // —— 三网回程线路 (IPv4 / IPv6) ——
   const routeTable = (rows: NetData["routes"], heading: string) => {

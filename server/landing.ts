@@ -87,7 +87,7 @@ const COPY: Record<Lang, Copy> = {
       },
       {
         name: "网络质量", flag: "-N", time: "约 3–5 分钟",
-        items: ["NAT 类型（NAT1–4）与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟，IPv4 与 IPv6", "31 省三网回程 + 教育网回程（-R）", "三网与国际测速，分省测速（-p）", "六大洲 36 个国际节点延迟"],
+        items: ["NAT 类型（NAT1–4）与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟 + 223 个市级节点", "31 省三网回程 + 教育网回程（-R）", "三网与国际测速，分省测速（-p）", "六大洲 36 个国际节点延迟"],
       },
     ],
     optionsTitle: "参数",
@@ -105,6 +105,7 @@ const COPY: Record<Lang, Copy> = {
       ["-x PROXY", "检测代理的出口，例 socks5h://127.0.0.1:1080"],
       ["-S LIST", "跳过部分检测：bench,media,mail,dns,latency,route,speed"],
       ["-R", "全省回程：31 省三网 + 大包 + 教育网回程"],
+      ["-c", "市级延迟：223 个市级节点"],
       ["-P", "不生成结果页"],
       ["-j  -E  -n", "输出 JSON / 英文报告 / 不显示颜色"],
     ],
@@ -163,7 +164,7 @@ const COPY: Record<Lang, Copy> = {
       },
       {
         name: "Network quality", flag: "-N", time: "3–5 min",
-        items: ["NAT type (NAT1–4) and TCP settings", "BGP upstreams, peers and RPKI", "Latency to 31 provinces, IPv4 + IPv6", "Routes: 31 provinces + CERNET (-R)", "Speed to China, provinces (-p), abroad", "Latency to 36 sites on 6 continents"],
+        items: ["NAT type (NAT1–4) and TCP settings", "BGP upstreams, peers and RPKI", "31 provinces plus 223 city nodes", "Routes: 31 provinces + CERNET (-R)", "Speed to China, provinces (-p), abroad", "Latency to 36 sites on 6 continents"],
       },
     ],
     optionsTitle: "Options",
@@ -181,6 +182,7 @@ const COPY: Record<Lang, Copy> = {
       ["-x PROXY", "Check a proxy exit, e.g. socks5h://127.0.0.1:1080"],
       ["-S LIST", "Skip: bench,media,mail,dns,latency,route,speed"],
       ["-R", "Routes for 31 provinces, large packets and CERNET"],
+      ["-c", "Latency to 223 city-level nodes"],
       ["-P", "Don't create a results page"],
       ["-j  -E  -n", "JSON output / English report / no colors"],
     ],
