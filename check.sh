@@ -2131,7 +2131,7 @@ menu_select() {
 	local choice
 	if [ "$LANG_OPT" = en ]; then
 		printf '  %s%s1%s  Full check-up    hardware → IP → network   %sabout 6 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  All checks       everything below, deeper  %sabout 25 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  All checks       everything below, deeper  %sabout 20 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  Hardware         CPU memory disk scores    %sabout 2 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP quality       purity unlocks blacklists %sabout 30 s%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  Network          BGP latency routes speed  %sabout 3 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -2141,7 +2141,7 @@ menu_select() {
 		printf '  %s0  Exit%s\n\n  Choose [1]: ' "$C_K" "$C_0"
 	else
 		printf '  %s%s1%s  一键全检      硬件 → IP → 网络      %s约 6 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  全部检测      下面各项全测一遍      %s约 25 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  全部检测      下面各项全测一遍      %s约 20 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  硬件与性能    系统 CPU 内存 硬盘    %s约 2 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP 质量       纯净度 解锁 黑名单    %s约 30 秒%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  网络质量      BGP 延迟 回程 测速    %s约 3 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
