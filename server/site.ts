@@ -15,9 +15,56 @@ const ICONS: Record<string, string> = {
   copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   arrow: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  download: '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
 }
 export const icon = (name: string, size: number) =>
   `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`
+
+// —— ANSI → HTML ——
+// 只认报告里实际用到的几种: 1 粗体 / 4 下划线 / 品牌绿 / 33 黄 / 31 红 / 90 灰 / 徽章底色 / 0 复位
+export function ansiToHtml(input: string): string {
+  let classes: string[] = []
+  let out = ""
+  const re = /\x1b\[([\d;]*)m/g
+  let last = 0
+  const emit = (text: string) => {
+    if (!text) return
+    // 汉字固定 2 列、其它非 ASCII 字符 (框线 / 方块 / 勾叉) 固定 1 列, 字体里缺字回落到别的字体时也对得齐
+    const body = [...text].map((ch) => {
+      if (/[一-鿿　-〿＀-￯]/.test(ch)) return `<span class="w2">${ch}</span>`
+      if (ch.charCodeAt(0) > 127) return `<span class="w1">${escapeHtml(ch)}</span>`
+      return escapeHtml(ch)
+    }).join("")
+    out += classes.length ? `<span class="${classes.join(" ")}">${body}</span>` : body
+  }
+  for (let m = re.exec(input); m; m = re.exec(input)) {
+    emit(input.slice(last, m.index))
+    last = re.lastIndex
+    const codes = m[1]!.split(";").map(Number)
+    for (let i = 0; i < codes.length; i++) {
+      const c = codes[i]
+      if (c === 0) classes = []
+      else if (c === 1) classes.push("a-b")
+      else if (c === 4) classes.push("a-u")
+      else if (c === 33) classes.push("a-y")
+      else if (c === 31) classes.push("a-r")
+      else if (c === 90) classes.push("a-k")
+      else if (c === 30) classes.push("f-d")
+      else if (c === 97) classes.push("f-w")
+      else if (c === 43) classes.push("bg-y")
+      else if (c === 41) classes.push("bg-r")
+      else if (c === 100) classes.push("bg-k")
+      else if ((c === 38 || c === 48) && codes[i + 1] === 2) {
+        classes.push(c === 38 ? "a-g" : "bg-g")
+        i += 4
+      }
+    }
+  }
+  emit(input.slice(last))
+  return out
+}
 
 export const SITE_CSS = `
 @font-face { font-family: "Ioskeley Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/IoskeleyMono-Regular.woff2") format("woff2"); }
@@ -246,7 +293,7 @@ footer a:hover { color: var(--color-neutral-900); }
 `
 
 
-export type Page = "home" | "changelog"
+export type Page = "home" | "changelog" | "results"
 
 /** CleanIP 官方横条 logo (viewBox 109.2 × 22), 按高度等比缩放 */
 export function cleanipLogo(height: number): string {
@@ -270,15 +317,15 @@ const CHROME = {
   },
 } as const
 
-const PATHS: Record<Page, string> = { home: "/", changelog: "/changelog" }
+const PATHS: Record<Page, string> = { home: "/", changelog: "/changelog", results: "/results" }
 
-/** 站内地址: 英文页带 ?lang=en */
-export function href(page: Page, lang: Lang, hash = ""): string {
-  return `${PATHS[page]}${lang === "en" ? "?lang=en" : ""}${hash}`
+/** 站内地址: 英文页带 ?lang=en; path 给定时用它代替页面的固定路径 (结果页每份地址不同) */
+export function href(page: Page, lang: Lang, hash = "", path = PATHS[page]): string {
+  return `${path}${lang === "en" ? "?lang=en" : ""}${hash}`
 }
 
-export function pageHead(lang: Lang, page: Page, title: string, description: string, extraCss = ""): string {
-  const url = `https://sh.cd${href(page, lang)}`
+export function pageHead(lang: Lang, page: Page, title: string, description: string, extraCss = "", opts: { path?: string, noindex?: boolean } = {}): string {
+  const url = `https://sh.cd${href(page, lang, "", opts.path)}`
   return `<!doctype html>
 <html lang="${CHROME[lang].htmlLang}">
 <head>
@@ -292,15 +339,15 @@ export function pageHead(lang: Lang, page: Page, title: string, description: str
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:url" content="${url}">
 <link rel="canonical" href="${url}">
-<link rel="alternate" hreflang="zh-CN" href="https://sh.cd${href(page, "zh")}">
-<link rel="alternate" hreflang="en" href="https://sh.cd${href(page, "en")}">
+${opts.noindex ? '<meta name="robots" content="noindex, nofollow">' : `<link rel="alternate" hreflang="zh-CN" href="https://sh.cd${href(page, "zh")}">
+<link rel="alternate" hreflang="en" href="https://sh.cd${href(page, "en")}">`}
 <link rel="preload" href="/fonts/IoskeleyMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#111827"/><rect x="5" y="3" width="6" height="10" fill="#35a952"/></svg>')}">
 <style>${SITE_CSS}${extraCss}</style>
 </head>`
 }
 
-export function siteHeader(lang: Lang, page: Page): string {
+export function siteHeader(lang: Lang, page: Page, path?: string): string {
   const c = CHROME[lang]
   // 首页的区块锚点在别的页面要带上首页地址
   const anchor = (hash: string) => (page === "home" ? hash : href("home", lang, hash))
@@ -315,7 +362,7 @@ export function siteHeader(lang: Lang, page: Page): string {
       <a class="hide-sm" href="${anchor("#data")}">${c.nav.data}</a>
       <a href="${href("changelog", lang)}"${current("changelog")}>${c.nav.changelog}</a>
       <a class="ext" href="https://github.com/CleanIP/sh.cd">GitHub${icon("arrow", 16)}</a>
-      <a class="lang" href="${href(page, lang === "zh" ? "en" : "zh")}" hreflang="${lang === "zh" ? "en" : "zh-CN"}">${c.switchLang}</a>
+      <a class="lang" href="${href(page, lang === "zh" ? "en" : "zh", "", path)}" hreflang="${lang === "zh" ? "en" : "zh-CN"}">${c.switchLang}</a>
     </nav>
   </div>
 </header>`

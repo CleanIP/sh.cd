@@ -15,7 +15,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.3.1"
+VERSION="1.4.0"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -28,6 +28,7 @@ ONLY_FAMILY=""
 PROXY=""
 IFACE=""
 JSON=0
+PRIVATE=0
 OPT_NOCOLOR=0
 DEEP=0
 AUTO_YES=0
@@ -62,7 +63,8 @@ Run without options in a terminal to open the menu.
   -x PROXY      Check a proxy exit, e.g. socks5h://user:pass@host:1080
   -i IFACE      Use a network interface, e.g. eth0
   -S LIST       Skip: bench,media,mail,dns,latency,route,speed
-  -j            JSON output
+  -j            JSON output (no results page)
+  -P            Don't create a results page (sh.cd/results/…)
   -n            No colors
   -l zh|en      Language (-E = English)
   -h / -v       Help / version
@@ -90,7 +92,8 @@ sh.cd v$VERSION — CleanIP 服务器全面体检: 硬件与性能 · IP 质量 
   -x PROXY      通过代理检测代理的出口, 例: socks5h://user:pass@host:1080
   -i IFACE      指定网卡, 例: eth0
   -S LIST       跳过部分检测: bench,media,mail,dns,latency,route,speed
-  -j            输出 JSON
+  -j            输出 JSON (不生成结果页)
+  -P            不生成结果页 (sh.cd/results/…)
   -n            不显示颜色
   -l zh|en      语言 (-E 等同 -l en)
   -h / -v       帮助 / 版本
@@ -106,7 +109,7 @@ for a in "$@"; do case "$a" in -E | -len* | -lEN*) LANG_OPT=en ;; esac; done
 add_stage() { case " $STAGES " in *" $1 "*) ;; *) STAGES="$STAGES $1" ;; esac; }
 
 # -a / -s 是 v0.2 的参数 (全国延迟 / 测速), 现在网络质量默认就包含, 保留兼容
-while getopts ":HINAdgpy46x:i:asS:jnl:Ehv" opt; do
+while getopts ":HINAdgpy46x:i:asS:jPnl:Ehv" opt; do
 	case "$opt" in
 	H) add_stage hw ;;
 	I) add_stage ip ;;
@@ -123,6 +126,7 @@ while getopts ":HINAdgpy46x:i:asS:jnl:Ehv" opt; do
 	a | s) ;;
 	S) SKIP=",$OPTARG," ;;
 	j) JSON=1 ;;
+	P) PRIVATE=1 ;;
 	n) OPT_NOCOLOR=1 ;;
 	l) case "$OPTARG" in en* | EN*) LANG_OPT=en ;; *) LANG_OPT=zh ;; esac ;;
 	E) LANG_OPT=en ;;
@@ -1683,6 +1687,15 @@ menu_select() {
 
 SEQ=1
 
+# 结果页: 每次运行生成一个随机密钥随各阶段提交, 服务端据此保存报告, 最后给出 https://sh.cd/results/<编号>。
+# 密钥只在本次运行里用, 别人拿到结果链接也写不了; -P 或 JSON 输出时不生成。
+RUN_KEY=""
+if [ "$PRIVATE" = 0 ] && [ "$JSON" = 0 ]; then
+	RUN_KEY=$(od -An -tx1 -N16 /dev/urandom 2>/dev/null | tr -d ' \n')
+	case "$RUN_KEY" in *[!0-9a-f]* | "") RUN_KEY="" ;; esac
+	[ "${#RUN_KEY}" = 32 ] || RUN_KEY=""
+fi
+
 # 提交一个阶段的本机检测结果, 服务端返回排好版的报告 (或 JSON)
 post_report() {
 	local stage="$1" file="$2" out="$3" fam="$4" args line code body
@@ -1697,6 +1710,7 @@ post_report() {
 	args=(-d "v=$VERSION" -d "lang=$LANG_OPT" -d "color=$COLOR" -d "stage=$stage" -d "seq=$SEQ" -d "stages=$STAGE_COUNT" -d "banner=$BANNER")
 	[ "$JSON" = 1 ] && args+=(-d format=json)
 	[ -n "$PROXY" ] && args+=(-d via=proxy)
+	[ -n "$RUN_KEY" ] && args+=(-d "run=$RUN_KEY")
 	while IFS= read -r line; do
 		[ -n "$line" ] && args+=(--data-urlencode "$line")
 	done <"$file"

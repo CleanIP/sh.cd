@@ -4,6 +4,7 @@
 //   POST /report      生成报告 (server/report.ts)
 //   POST /dns/start   DNS 出口检测: 发一个一次性子域名
 //   GET  /changelog   更新日志: 浏览器给网页, curl 给 Markdown 纯文本 (server/changelog.ts)
+//   GET  /results/<编号>[.md|.txt]   检测结果页 (server/results.ts)
 //   GET  /fonts/*    官网字体 Ioskeley Mono (SIL OFL 1.1, 授权文本 /fonts/OFL.txt)
 //   GET  /brand/cleanip-logo.svg   CleanIP logo
 //   GET  /healthz
@@ -17,6 +18,7 @@ import { changelogPage, changelogText } from "./changelog"
 import { landingPage } from "./landing"
 import { langOf } from "./render/base"
 import { handleReport, type Form } from "./report"
+import { loadResult, resultMarkdown, resultNotFoundPage, resultPage, resultText, startResultSweeper } from "./results"
 import { dnsProbeStart } from "./upstream"
 
 const SCRIPT = resolve(import.meta.dir, "../check.sh")
@@ -47,6 +49,8 @@ function parseForm(raw: string): Form {
   return out
 }
 
+startResultSweeper()
+
 const server = Bun.serve({
   hostname: process.env.HOST || "127.0.0.1",
   port: Number(process.env.PORT || 3410),
@@ -73,6 +77,30 @@ const server = Bun.serve({
         return new Response(changelogPage(lang), { headers: { ...headers, "content-type": "text/html; charset=utf-8" } })
       }
       return new Response(changelogText(lang), { headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
+    }
+
+    const result = /^\/results\/([^/.]+)(\.md|\.txt)?$/.exec(url.pathname)
+    if (result && (req.method === "GET" || req.method === "HEAD")) {
+      const r = loadResult(result[1]!)
+      const html = (req.headers.get("accept") || "").includes("text/html") && !result[2] && !url.searchParams.has("raw")
+      const lang = url.searchParams.has("lang")
+        ? langOf(url.searchParams.get("lang"))
+        : r?.lang ?? langOf((req.headers.get("accept-language") || "zh").startsWith("zh") ? "zh" : "en")
+      // 运行中的检测会继续往结果里写, 不让中间层缓存旧内容; 结果页不进搜索引擎
+      const headers = { "cache-control": "no-cache", "x-robots-tag": "noindex, nofollow", vary: "Accept" }
+      if (!r) {
+        return html
+          ? new Response(resultNotFoundPage(lang, url.pathname), { status: 404, headers: { ...headers, "content-type": "text/html; charset=utf-8" } })
+          : new Response(lang === "zh" ? "结果不存在或已过期\n" : "Result not found or expired\n", { status: 404, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
+      }
+      if (result[2] === ".md") {
+        return new Response(resultMarkdown(r), { headers: { ...headers, "content-type": "text/markdown; charset=utf-8", "content-disposition": `inline; filename="sh.cd-${r.id}.md"` } })
+      }
+      if (html) return new Response(resultPage(r, lang), { headers: { ...headers, "content-type": "text/html; charset=utf-8" } })
+      // 终端里看: curl / wget 默认带颜色, ?color=0 / 1 手动指定; .txt 始终不带颜色
+      const ua = (req.headers.get("user-agent") || "").toLowerCase()
+      const color = result[2] !== ".txt" && (url.searchParams.has("color") ? url.searchParams.get("color") === "1" : /^(curl|wget)\//.test(ua))
+      return new Response(resultText(r, color), { headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
     }
 
     if (url.pathname === "/report" && req.method === "POST") {

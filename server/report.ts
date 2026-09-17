@@ -11,16 +11,18 @@
 // 表单字段见 check.sh 各阶段注释与 render/local.ts 顶注; 另有:
 //   v=1.1.0  lang=zh|en  color=0|1  format=json  stage=…  seq=本次运行的第几次提交 (1 才计数)
 //   stages=本次计划跑几项  via=proxy  dur=阶段耗时秒  deep=1  banner=1 (脚本已打印开头字符画)
+//   run=本次运行的随机密钥 (32 位十六进制): 带上时各阶段存进结果页, 最后的页脚给出链接 (server/results.ts)
 
 import { hitStats, recordHit } from "./hits"
 import { rateLimit, rateLimitKey } from "./limit"
-import { createRenderer, langOf, renderHeader, renderIpSections, stageBar } from "./render/base"
+import { createRenderer, langOf, renderHeader, renderIpSections, stageBar, type Renderer } from "./render/base"
 import { HW_TITLE, parseHw, renderHw } from "./render/hw"
 import { renderIpDetail } from "./render/ip"
 import { parseIpcheckFields, renderLocalSections } from "./render/local"
 import { NET_TITLE, parseNet, renderNet, renderRouteDetail, ROUTE_TITLE, type HopInfo } from "./render/net"
 import { classifyRoute } from "./render/route"
 import { renderSummary } from "./render/summary"
+import { hwFact, ipFact, isRunKey, netFacts, saveSection, type Fact, type FactKey, type SectionKey } from "./results"
 import { bgpInfo, fetchIp, geoLookup, resolveDns } from "./upstream"
 
 export type Form = Record<string, string | string[]>
@@ -70,6 +72,9 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
   const { paint } = R
   const out: string[] = []
   const done = () => text(200, out.join("\n"))
+  // 结果页: JSON 输出不保存
+  const runKey = !asJson && isRunKey(one("run")) ? one("run")! : null
+  const planned = /^\d{1,2}$/.test(one("stages") || "") ? Number(one("stages")) : 1
   const blocked = () => text(403, zh
     ? "当前出口 IP 因程序化抓取已被限制访问。\n如属误封请到 https://cleanip.io/feedback 反馈。\n"
     : "This IP has been restricted due to automated scraping.\nIf this is a mistake, let us know at https://cleanip.io/feedback\n")
@@ -85,13 +90,31 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     }
     out.push(stageBar(R, stageTitle, dur), "")
   }
-  const footer = () => {
+  const footer = (link: string | null) => {
     out.push("")
+    if (link) out.push(`  ${paint(zh ? "查看与分享" : "View & share", "gray")}  ${paint(link, "brand", "bold")}`, "")
     const today = hits.today.toLocaleString("en-US")
     const total = hits.total.toLocaleString("en-US")
     out.push(paint(zh ? `  脚本检测: 今日 ${today} 次 · 累计 ${total} 次` : `  Script runs: ${today} today · ${total} total`, "gray"))
     out.push(paint(zh ? "  源码: https://github.com/CleanIP/sh.cd" : "  Source: https://github.com/CleanIP/sh.cd", "gray"))
     out.push("")
+  }
+  /**
+   * 输出一个阶段: 终端报告 = 报告头与阶段标题条 + 内容 (+ 页脚)。
+   * 带运行密钥时, 同样的内容再按彩色 / 纯文本各排一次存进结果页 (build 必须是纯函数)。
+   */
+  const emit = (key: SectionKey, title: string | null, build: (X: Renderer) => string[], withFooter: boolean, facts: Partial<Record<FactKey, Fact>> = {}) => {
+    let link: string | null = null
+    if (runKey) {
+      const section = (X: Renderer) => [...(title ? [stageBar(X, title, dur), ""] : []), ...build(X)].join("\n")
+      link = saveSection(runKey, { lang, version, planned, ip: R.ip(caller) },
+        { key, dur: title ? dur : null, ansi: section(createRenderer(lang, true, caller)), plain: section(createRenderer(lang, false, caller)) }, facts)
+    }
+    if (title) header(title)
+    else out.push("")
+    out.push(...build(R))
+    if (withFooter) footer(link)
+    return done()
   }
   const line = (routes: { carrier: Parameters<typeof classifyRoute>[0], hops: Parameters<typeof classifyRoute>[1] }) =>
     routes.hops.length ? classifyRoute(routes.carrier, routes.hops).code : "no_reply"
@@ -100,10 +123,8 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
   if (stage === "hw") {
     const hw = parseHw(body)
     if (asJson) return json({ ok: true, stage, hardware: hw })
-    header(zh ? HW_TITLE[0] : HW_TITLE[1])
-    if (hw) out.push(...renderHw(R, hw))
-    if (single) footer()
-    return done()
+    const fact = hw ? hwFact(hw, lang) : null
+    return emit("hw", zh ? HW_TITLE[0] : HW_TITLE[1], (X) => (hw ? renderHw(X, hw) : []), single, fact ? { hw: fact } : {})
   }
 
   // —— 回程路由详情: 每一跳查归属 (只用本地地理库) ——
@@ -121,11 +142,9 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     }
     const withInfo = (rows: NonNullable<typeof net>["routes"] | undefined) => rows?.map((r) => ({ ...r, line: line(r), hops: r.hops.map((h) => ({ ...h, ...hops[h.ip] })) }))
     if (asJson) return json({ ok: true, stage, routes: withInfo(net?.routes), routes6: withInfo(net?.routes6) })
-    header(zh ? ROUTE_TITLE[0] : ROUTE_TITLE[1])
-    if (net) out.push(...renderRouteDetail(R, net, hops))
-    // 全部检测时后面还有总览, 页脚留给总览
-    if (single) footer()
-    return done()
+    // 全部检测时后面还有总览, 页脚留给总览; 网络质量阶段已经给过三网线路要点, 单独跑回程详情时才补
+    const facts = net && single ? netFacts(net, lang) : {}
+    return emit("route", zh ? ROUTE_TITLE[0] : ROUTE_TITLE[1], (X) => (net ? renderRouteDetail(X, net, hops) : []), single, facts)
   }
 
   // —— 网络质量 ——
@@ -133,10 +152,7 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     const net = parseNet(body)
     const bgp = await bgpInfo((await fetchIp(caller)).r)
     if (asJson) return json({ ok: true, stage, network: net && { ...net, routes: net.routes.map((r) => ({ ...r, line: line(r) })), routes6: net.routes6.map((r) => ({ ...r, line: line(r) })) }, bgp })
-    header(zh ? NET_TITLE[0] : NET_TITLE[1])
-    if (net) out.push(...renderNet(R, net, bgp))
-    if (single) footer()
-    return done()
+    return emit("net", zh ? NET_TITLE[0] : NET_TITLE[1], (X) => (net ? renderNet(X, net, bgp) : []), single, net ? netFacts(net, lang) : {})
   }
 
   // —— 体检总览 ——
@@ -144,16 +160,14 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     const { r, blocked: isBlocked } = await fetchIp(caller)
     if (isBlocked) return blocked()
     const local = parseIpcheckFields(body)
-    out.push("")
-    out.push(...renderSummary(R, {
+    const parts = {
       hw: parseHw(body),
       ip: r,
       local: Object.keys(local.media).length || local.mail ? local : null,
       net: parseNet(body),
       took: sumDur(body.dur),
-    }))
-    footer()
-    return done()
+    }
+    return emit("summary", null, (X) => renderSummary(X, parts), true)
   }
 
   // —— IP 质量 ——
@@ -167,15 +181,12 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
   if (asJson) {
     return json({ ok: true, stage, ip: r, local: { media: local.media, mail: local.mail, dns } })
   }
-  header(zh ? "IP 质量" : "IP quality")
-  if (r) {
-    out.push(...renderIpSections(R, { ...r, ip: r.ip! }))
-    out.push(...renderIpDetail(R, r))
-  } else {
-    out.push(R.row(zh ? "IP 情报" : "IP intel", paint(zh ? "暂时获取失败, 请稍后重试" : "Temporarily unavailable, please retry later", "yellow")))
-    out.push(R.hr())
-  }
-  out.push(...renderLocalSections(R, local, dns))
-  if (single) footer()
-  return done()
+  const key: SectionKey = one("via") === "proxy" ? "ipp" : caller.includes(":") ? "ip6" : "ip4"
+  const fact = r ? ipFact(r, lang) : null
+  return emit(key, zh ? "IP 质量" : "IP quality", (X) => [
+    ...(r
+      ? [...renderIpSections(X, { ...r, ip: r.ip! }), ...renderIpDetail(X, r)]
+      : [X.row(zh ? "IP 情报" : "IP intel", X.paint(zh ? "暂时获取失败, 请稍后重试" : "Temporarily unavailable, please retry later", "yellow")), X.hr()]),
+    ...renderLocalSections(X, local, dns),
+  ], single, fact ? { ip: fact } : {})
 }

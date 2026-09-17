@@ -71,7 +71,8 @@ Geekbench 6（`-g`，全部检测默认包含）从 Geekbench 官方下载约 22
   -x PROXY      通过代理检测代理的出口, 例: socks5h://user:pass@host:1080
   -i IFACE      指定网卡, 例: eth0
   -S LIST       跳过部分检测: bench,media,mail,dns,latency,route,speed
-  -j            输出 JSON
+  -j            输出 JSON (不生成结果页)
+  -P            不生成结果页
   -n            不显示颜色
   -l zh|en      语言 (-E 等同 -l en)
   -h / -v       帮助 / 版本
@@ -95,6 +96,18 @@ bash <(curl -Ls https://sh.cd) -A -E -j > report.json
 
 不带参数但输出被重定向（非终端）时，默认只测 IP 质量。
 
+## 结果页
+
+每次检测结束时报告底部给出一个结果页地址，例如 `https://sh.cd/results/7xKp2mQa9Z`（10 位编号）：
+
+- 浏览器打开：按总览 / 硬件 / IP / 网络 / 回程分页查看，顶部列出硬件、IP、三网回程、带宽要点
+- 一键「复制链接」「复制 Markdown」「下载 .md」，Markdown 每一项是一个代码块，贴到论坛或文档里排版不乱
+- 终端里查看：`curl -s https://sh.cd/results/<编号>`；纯文本 `<编号>.txt`、Markdown `<编号>.md`
+- 报告里本机网段的 IP 只显示前两段；结果页不进搜索引擎，保存 365 天
+- 不想保存加 `-P`；`-j` 输出 JSON 时也不保存
+
+编号由脚本本次运行生成的随机密钥推出，只有这次运行能写入，拿到链接的人只能查看。
+
 ## 运行要求
 
 - bash 3.2 及以上与 curl；Linux 上检测最完整，macOS 可以跑 IP 质量和大部分网络检测
@@ -111,6 +124,7 @@ bash <(curl -Ls https://sh.cd) -A -E -j > report.json
 - IP：解锁状态与地区、邮箱握手成功与否、一次性的 DNS 检测编号
 - 网络：NAT 类型与公网 IP、TCP 参数、三网延迟（IPv4 / IPv6）、回程逐跳 IP、测速结果
 - 脚本版本、报告语言与是否带颜色
+- 本次运行的随机密钥（用于生成结果页，加 `-P` 时不发送）
 
 IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定其他 IP；IP 情报由 sh.cd 向 CleanIP 查询。脚本不读取、不发送主机名、文件或登录信息。
 
@@ -136,6 +150,7 @@ server/report.ts    按阶段解析脚本提交的字段, 调用 render/ 排版
 server/render/      终端报告排版: 硬件、IP、网络、回程判定、总览 (prefix/ 是 IPv6 骨干网段清单)
 server/upstream.ts  IP 情报、DNS 出口、BGP 数据的获取
 server/landing.ts   浏览器打开 sh.cd 时的首页
+server/results.ts   检测结果页 https://sh.cd/results/<编号> (网页 / Markdown / 纯文本)
 server/changelog.ts 更新日志页 https://sh.cd/changelog
 server/site.ts      官网各页共用的样式、顶栏与页脚
 server/sample.ts    首页的示例报告 (示例数据, 用线上同一套排版生成)
@@ -181,4 +196,4 @@ A one-line server check-up by CleanIP: hardware and benchmarks, IP quality, and 
 bash <(curl -Ls https://sh.cd) -E
 ```
 
-Run it in a terminal to open the menu. The full check-up runs hardware → IP → network straight through, shows each section as soon as it finishes, and ends with a one-screen summary. Requires bash (3.2+) and curl; sysbench and fio (plus smartmontools and dmidecode on bare metal) are installed only if you agree (or with `-y`). `-g` adds Geekbench 6 (results are uploaded publicly to Geekbench Browser) and `-p` adds speed tests to Chinese provinces; menu option 2 / `-A -d` runs everything. Run with `-h` for all options.
+Run it in a terminal to open the menu. The full check-up runs hardware → IP → network straight through, shows each section as soon as it finishes, and ends with a one-screen summary. Requires bash (3.2+) and curl; sysbench and fio (plus smartmontools and dmidecode on bare metal) are installed only if you agree (or with `-y`). `-g` adds Geekbench 6 (results are uploaded publicly to Geekbench Browser) and `-p` adds speed tests to Chinese provinces; menu option 2 / `-A -d` runs everything. Each run ends with a shareable results page (`https://sh.cd/results/<id>`) with one-click link and Markdown export; add `-P` to skip it. Run with `-h` for all options.

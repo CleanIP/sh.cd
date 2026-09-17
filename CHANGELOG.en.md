@@ -2,6 +2,14 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.4.0 · 2026-09-18
+
+### Added
+
+- Results page: every run ends with a link like `https://sh.cd/results/…` (10-character id) showing the summary, hardware, IP, network and routes on separate tabs, with key facts for hardware, IP, routes to China and bandwidth at the top
+- One-click copy link, copy Markdown and download .md, plus copying a single section; `curl -s` on the same link prints the report in a terminal
+- IPs on the results page are masked to the first two parts like the terminal report; pages are not indexed and are kept for 365 days. `-P` skips the results page, and `-j` JSON output never creates one
+
 ## v1.3.1 · 2026-09-18
 
 ### Fixed

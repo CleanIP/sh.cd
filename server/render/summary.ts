@@ -16,11 +16,46 @@ const T = {
   took: ["用时", "took"],
 } satisfies Record<string, Pair>
 
-const VIRT_SHORT: Record<string, Pair> = {
+export const VIRT_SHORT: Record<string, Pair> = {
   none: ["物理机", "Bare metal"], kvm: ["KVM", "KVM"], qemu: ["QEMU", "QEMU"], xen: ["Xen", "Xen"], vmware: ["VMware", "VMware"],
   microsoft: ["Hyper-V", "Hyper-V"], amazon: ["AWS", "AWS"], google: ["GCP", "GCP"], openvz: ["OpenVZ", "OpenVZ"], lxc: ["LXC", "LXC"],
   docker: ["Docker", "Docker"], vm: ["虚拟机", "VM"],
 }
+
+/** 每个运营商三个城市里出现最多的已识别线路; 三城都认不出才取未识别 */
+export function routeTops(net: NetData): Array<{ carrier: "ct" | "cu" | "cm", cls: ReturnType<typeof classifyRoute> }> {
+  const out: Array<{ carrier: "ct" | "cu" | "cm", cls: ReturnType<typeof classifyRoute> }> = []
+  for (const c of ["ct", "cu", "cm"] as const) {
+    const rs = net.routes.filter((r) => r.carrier === c && r.hops.length).map((r) => classifyRoute(c, r.hops))
+    if (!rs.length) continue
+    const known = rs.filter((cls) => cls.code !== "unknown")
+    const counts = new Map<string, { n: number, cls: typeof rs[number] }>()
+    for (const cls of known.length ? known : rs) counts.set(cls.code, { n: (counts.get(cls.code)?.n ?? 0) + 1, cls })
+    out.push({ carrier: c, cls: [...counts.values()].sort((x, y) => y.n - x.n)[0]!.cls })
+  }
+  return out
+}
+
+/** 三网延迟各格中位数的平均 (ms), 没有数据时为 null */
+export function latencyAvg(rows: NetData["latency"]): number | null {
+  const meds = rows.map((x) => median(rttSamples(x.samples).values.filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
+  return meds.length ? Math.round(meds.reduce((s, m) => s + m, 0) / meds.length) : null
+}
+
+/**
+ * 本机带宽: 就近节点上下行正常 (相差不到 5 倍) 就用它; 否则就近节点多半自己限速
+ * (2026-09-17 香港机排到新竹, 下载 45 Mbps、上传 1.15 Gbps), 改取境外节点里上下行较小值最大的一个。
+ * 国内节点从境外测普遍受限, 不参与。
+ */
+export function bestBandwidth(net: NetData): { down: number, up: number } | null {
+  const isNum = (v: number | "stall" | null): v is number => typeof v === "number"
+  const both = net.speed.filter((s): s is typeof s & { down: number, up: number } => isNum(s.down) && isNum(s.up))
+  const balanced = (s: { down: number, up: number }) => Math.min(s.down, s.up) * 5 >= Math.max(s.down, s.up)
+  const near = both.find((s) => s.carrier === "near" && balanced(s))
+  return near ?? both.filter((s) => s.carrier === "near" || s.carrier === "intl").sort((x, y) => Math.min(y.down, y.up) - Math.min(x.down, x.up))[0] ?? null
+}
+
+export const CARRIER_SHORT: Record<"ct" | "cu" | "cm", Pair> = { ct: ["电信", "CT"], cu: ["联通", "CU"], cm: ["移动", "CM"] }
 
 export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpReport | null, local: IpcheckLocal | null, net: NetData | null, took: number }): string[] {
   const { L, paint, tonePaint, badge, lang } = R
@@ -111,32 +146,14 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
 
   const net = parts.net
   if (net) {
-    const a: string[] = []
-    for (const c of ["ct", "cu", "cm"] as const) {
-      const rs = net.routes.filter((r) => r.carrier === c && r.hops.length).map((r) => classifyRoute(c, r.hops))
-      if (!rs.length) continue
-      // 三个城市里出现最多的已识别线路; 三城都认不出才写未识别
-      const known = rs.filter((cls) => cls.code !== "unknown")
-      const counts = new Map<string, { n: number, cls: typeof rs[number] }>()
-      for (const cls of known.length ? known : rs) counts.set(cls.code, { n: (counts.get(cls.code)?.n ?? 0) + 1, cls })
-      const top = [...counts.values()].sort((x, y) => y.n - x.n)[0]!.cls
-      const name = { ct: ["电信", "CT"], cu: ["联通", "CU"], cm: ["移动", "CM"] }[c] as Pair
-      a.push(`${L(name)} ${top.tone === "good" ? tonePaint(L(top.label), "good", "bold") : L(top.label)}`)
-    }
+    const a = routeTops(net).map(({ carrier, cls }) => `${L(CARRIER_SHORT[carrier])} ${cls.tone === "good" ? tonePaint(L(cls.label), "good", "bold") : L(cls.label)}`)
     if (a.length) line(L(T.net), a.join(" · "))
     const b: string[] = []
-    const meds = net.latency.map((x) => median(rttSamples(x.samples).values.filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
-    if (meds.length) b.push(`${zh ? "三网平均" : "China avg"} ${paint(`${Math.round(meds.reduce((s, m) => s + m, 0) / meds.length)} ms`, "bold")}`)
-    const meds6 = net.latency6.map((x) => median(rttSamples(x.samples).values.filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
-    if (meds6.length) b.push(`IPv6 ${paint(`${Math.round(meds6.reduce((s, m) => s + m, 0) / meds6.length)} ms`, "bold")}`)
-    // 本机带宽: 就近节点上下行正常 (相差不到 5 倍) 就用它; 否则就近节点多半自己限速
-    // (2026-09-17 香港机排到新竹, 下载 45 Mbps、上传 1.15 Gbps), 改取境外节点里上下行较小值最大的一个。
-    // 国内节点从境外测普遍受限, 不参与。
-    const isNum = (v: number | "stall" | null): v is number => typeof v === "number"
-    const both = net.speed.filter((s): s is typeof s & { down: number, up: number } => isNum(s.down) && isNum(s.up))
-    const balanced = (s: { down: number, up: number }) => Math.min(s.down, s.up) * 5 >= Math.max(s.down, s.up)
-    const near = both.find((s) => s.carrier === "near" && balanced(s))
-    const best = near ?? both.filter((s) => s.carrier === "near" || s.carrier === "intl").sort((x, y) => Math.min(y.down, y.up) - Math.min(x.down, x.up))[0]
+    const avg = latencyAvg(net.latency)
+    if (avg !== null) b.push(`${zh ? "三网平均" : "China avg"} ${paint(`${avg} ms`, "bold")}`)
+    const avg6 = latencyAvg(net.latency6)
+    if (avg6 !== null) b.push(`IPv6 ${paint(`${avg6} ms`, "bold")}`)
+    const best = bestBandwidth(net)
     if (best) b.push(`${zh ? "带宽" : "bandwidth"} ${paint(`${fmtMbps(best.down)} / ${fmtMbps(best.up)}`, "bold")}`)
     if (b.length) lines(a.length ? "" : L(T.net), b)
   }

@@ -6,55 +6,9 @@
 // 访客可见文案不写实现细节 (后端 / 缓存 / 接口名等)。
 
 import { BANNER_LOGO, type Lang } from "./render/base"
-import { cleanipLogo, escapeHtml, href, icon, pageHead, siteFooter, siteHeader } from "./site"
+import { ansiToHtml, cleanipLogo, escapeHtml, href, icon, pageHead, siteFooter, siteHeader } from "./site"
 import { VERSION } from "./version"
 import { sampleReports, type SampleTab } from "./sample"
-
-// —— ANSI → HTML ——
-// 只认报告里实际用到的几种: 1 粗体 / 4 下划线 / 品牌绿 / 33 黄 / 31 红 / 90 灰 / 徽章底色 / 0 复位
-
-
-function ansiToHtml(input: string): string {
-  let classes: string[] = []
-  let out = ""
-  const re = /\x1b\[([\d;]*)m/g
-  let last = 0
-  const emit = (text: string) => {
-    if (!text) return
-    // 汉字固定 2 列、其它非 ASCII 字符 (框线 / 方块 / 勾叉) 固定 1 列, 字体里缺字回落到别的字体时也对得齐
-    const body = [...text].map((ch) => {
-      if (/[一-鿿　-〿＀-￯]/.test(ch)) return `<span class="w2">${ch}</span>`
-      if (ch.charCodeAt(0) > 127) return `<span class="w1">${escapeHtml(ch)}</span>`
-      return escapeHtml(ch)
-    }).join("")
-    out += classes.length ? `<span class="${classes.join(" ")}">${body}</span>` : body
-  }
-  for (let m = re.exec(input); m; m = re.exec(input)) {
-    emit(input.slice(last, m.index))
-    last = re.lastIndex
-    const codes = m[1]!.split(";").map(Number)
-    for (let i = 0; i < codes.length; i++) {
-      const c = codes[i]
-      if (c === 0) classes = []
-      else if (c === 1) classes.push("a-b")
-      else if (c === 4) classes.push("a-u")
-      else if (c === 33) classes.push("a-y")
-      else if (c === 31) classes.push("a-r")
-      else if (c === 90) classes.push("a-k")
-      else if (c === 30) classes.push("f-d")
-      else if (c === 97) classes.push("f-w")
-      else if (c === 43) classes.push("bg-y")
-      else if (c === 41) classes.push("bg-r")
-      else if (c === 100) classes.push("bg-k")
-      else if ((c === 38 || c === 48) && codes[i + 1] === 2) {
-        classes.push(c === 38 ? "a-g" : "bg-g")
-        i += 4
-      }
-    }
-  }
-  emit(input.slice(last))
-  return out
-}
 
 /** 报告转 HTML; 开头的字符画单独包一层, 行距设成字体里方块的高度 (1.25em), 上下正好连成片 */
 function reportHtml(report: string): string {
@@ -110,7 +64,7 @@ const COPY: Record<Lang, Copy> = {
     lead: "硬件与性能、IP 纯净度与解锁、BGP 与三网回程、国内外带宽，一口气测完，最后给一屏适合截图的总览。",
     copy: "复制",
     copied: "已复制",
-    meta: ["只需要 bash 与 curl", "Linux / macOS", "全检约 5 分钟", "中途不用操作"],
+    meta: ["只需要 bash 与 curl", "Linux / macOS", "全检约 5 分钟", "中途不用操作", "结果页一键分享"],
     stats: [["31", "省", "三网延迟走势"], ["9", "项", "流媒体与 AI 解锁"], ["12", "家", "邮箱 25 端口握手"], ["3", "城", "三网回程线路识别"]],
     sampleTitle: "示例报告",
     sampleMeta: "洛杉矶 KVM · 示例数据",
@@ -150,6 +104,7 @@ const COPY: Record<Lang, Copy> = {
       ["-4  -6", "只检测 IPv4 或 IPv6 的 IP 质量"],
       ["-x PROXY", "检测代理的出口，例 socks5h://127.0.0.1:1080"],
       ["-S LIST", "跳过部分检测：bench,media,mail,dns,latency,route,speed"],
+      ["-P", "不生成结果页"],
       ["-j  -E  -n", "输出 JSON / 英文报告 / 不显示颜色"],
     ],
     examplesTitle: "常用示例",
@@ -170,6 +125,7 @@ const COPY: Record<Lang, Copy> = {
     privacy: [
       "检测在你的机器上完成，结果提交到 sh.cd 生成报告：硬件型号与跑分、硬盘健康、解锁与邮箱握手结果、延迟、回程逐跳 IP、测速结果。",
       "使用 -g 时 Geekbench 会把跑分结果公开上传到 Geekbench 官网，报告只附结果页链接。",
+      "每次检测生成一个结果页 sh.cd/results/…，可复制链接或导出 Markdown 分享；报告里的 IP 只显示前两段，保存 365 天，不想保存加 -P。",
       "只查询发起请求的出口 IP，不能指定其他 IP。",
       "不读取、不发送主机名、文件或登录信息，也不发送硬盘和内存条的序列号。",
     ],
@@ -183,7 +139,7 @@ const COPY: Record<Lang, Copy> = {
     lead: "Hardware and benchmarks, IP purity and unlocks, BGP and return routes to China, bandwidth at home and abroad — all in one run, ending with a one-screen summary.",
     copy: "Copy",
     copied: "Copied",
-    meta: ["bash + curl only", "Linux / macOS", "About 5 min", "No prompts along the way"],
+    meta: ["bash + curl only", "Linux / macOS", "About 5 min", "No prompts along the way", "Shareable results page"],
     stats: [["31", "", "provinces × 3 carriers"], ["9", "", "streaming & AI unlocks"], ["12", "", "mail providers on port 25"], ["3", "", "cities of return routes"]],
     sampleTitle: "Sample report",
     sampleMeta: "Los Angeles KVM · sample data",
@@ -223,6 +179,7 @@ const COPY: Record<Lang, Copy> = {
       ["-4  -6", "IP quality for IPv4 or IPv6 only"],
       ["-x PROXY", "Check a proxy exit, e.g. socks5h://127.0.0.1:1080"],
       ["-S LIST", "Skip: bench,media,mail,dns,latency,route,speed"],
+      ["-P", "Don't create a results page"],
       ["-j  -E  -n", "JSON output / English report / no colors"],
     ],
     examplesTitle: "Examples",
@@ -243,6 +200,7 @@ const COPY: Record<Lang, Copy> = {
     privacy: [
       "Checks run on your machine; results are sent to sh.cd to build the report: hardware model and scores, disk health, unlock and SMTP results, latency, per-hop route IPs and speed.",
       "With -g, Geekbench uploads its results publicly to Geekbench Browser; the report only links to that page.",
+      "Each run gets a results page at sh.cd/results/… to share as a link or Markdown; IPs show only the first two parts, pages are kept for 365 days, and -P turns it off.",
       "Only the IP making the request is looked up — no other IP can be queried.",
       "No hostname, files or credentials are read or sent, and no disk or memory serial numbers.",
     ],
