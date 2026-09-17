@@ -14,11 +14,15 @@ bash <(curl -Ls https://sh.cd)
 
 | 项目 | 内容 |
 | --- | --- |
-| 系统 | 发行版与内核、虚拟化类型（KVM / Xen / OpenVZ / LXC / 物理机等）、运行时间与负载、进程与服务、时区 |
+| 系统 | 发行版与内核、虚拟化类型（KVM / Xen / OpenVZ / LXC / 物理机等）、运行时间与负载、进程与服务、时区、CPU / 硬盘 / 主板温度（系统能读到时） |
 | 主板与设备 | 厂商型号、BIOS、芯片组、网卡、显卡 |
-| CPU | 型号、核心与线程、频率、L1/L2/L3 缓存、AES-NI / AVX2 / AVX-512 / VT-x 等指令集、sysbench 单线程与多线程跑分 |
-| 内存 | 容量与占用、Swap、超开迹象（气球回收、KSM）、sysbench 读写带宽 |
-| 硬盘 | 块设备与容量、fio 4K 随机 Q1 / Q32、顺序 1M Q1 / Q8 的读写速度与 IOPS；`-d` 加测 ATTO 块大小表 |
+| CPU | 型号、核心与线程、频率、L1/L2/L3 缓存、AES-NI / AVX2 / AVX-512 / VT-x 等指令集、sysbench 单线程与多线程跑分；`-g` 加跑 Geekbench 6 |
+| 内存 | 容量与占用、Swap、内存气球、sysbench 读写带宽；物理机列出插槽数、最大容量、ECC 与每条内存的容量、代数、频率、厂商型号 |
+| 硬盘 | 块设备与容量、fio 4K 随机 Q1 / Q32、顺序 1M Q1 / Q8 的读写速度与 IOPS；`-d` 加测 ATTO 块大小表；物理机读 SMART：健康状态、通电时间、温度、寿命已用、累计写入、坏道重映射 |
+
+硬盘 SMART、内存条与温度只有物理机（独立服务器）读得到，而且需要 root 或免密 sudo；虚拟机上这几项不显示。
+
+Geekbench 6（`-g`，全部检测默认包含）从 Geekbench 官方下载约 220 MB，跑 3–10 分钟，免费版会把结果公开上传到 Geekbench 官网，报告里给出结果页链接；内存加 Swap 不足 1.5 GB、剩余空间不足 1 GB 或下载太慢时跳过。
 
 ### IP 质量
 
@@ -38,14 +42,17 @@ bash <(curl -Ls https://sh.cd)
 
 | 项目 | 内容 |
 | --- | --- |
-| 本地策略 | NAT 类型（公网直连 / NAT 后）、TCP 拥塞控制与队列、收发缓冲区、IPv6 可用性 |
+| 本地策略 | NAT 类型（公网直连 / 防火墙 / 全锥形 NAT1 / 受限锥形 NAT2 / 端口限制锥形 NAT3 / 对称 NAT4）、TCP 拥塞控制与队列、收发缓冲区、IPv6 可用性 |
 | BGP 与接入 | ASN 注册信息与地址、路由与 RPKI、上游 / 对等 / 下游数量、IX 与机房数、主要上游 |
-| 三网延迟 | 全国 31 省电信 / 联通 / 移动的 TCP 延迟，每格 5 次采样的走势与中位数 |
-| 三网回程线路 | 北京、上海、广州三网回程，识别 CN2 GIA / CN2 GT / 163 / CTGNET / 9929 / 4837 / CUG / CMIN2 / CMI；菜单 6 或全部检测（菜单 2 / `-A -d`）看逐跳位置、延迟与 ASN |
+| 三网延迟 | 全国 31 省电信 / 联通 / 移动的 TCP 延迟，每格 5 次采样的走势与中位数；有 IPv6 时加测三网 IPv6 延迟 |
+| 三网回程线路 | 北京、上海、广州三网回程，识别 CN2 GIA / CN2 GT / 163 / CTGNET / 9929 / 4837 / CUG / CMIN2 / CMI；有 IPv6 时 IPv6 回程也测；菜单 6 或全部检测（菜单 2 / `-A -d`）看逐跳位置、延迟与 ASN |
 | 带宽测速 | 就近节点、国内电信 / 联通、中国移动香港，以及香港 / 东京 / 新加坡 / 洛杉矶 / 法兰克福 / 伦敦的上传下载 |
+| 分省测速 | `-p`（全部检测默认包含）：北京、天津、上海、江苏、浙江、福建、湖北、湖南、四川的三网节点 |
 | 国际延迟 | 香港、台北、首尔、东京、新加坡、悉尼、洛杉矶、纽约、法兰克福、阿姆斯特丹、伦敦、巴黎 |
 
 国内移动的测速节点全部不接受境外连接或对境外限速，所以移动用中国移动香港节点代替，报告里标明是香港。
+
+分省测速的节点大多拦截境外来源（从洛杉矶只能连上北京、上海、江苏的几个），连不上的显示「不可达」；在国内的服务器上跑才测得全。
 
 ## 参数
 
@@ -54,9 +61,11 @@ bash <(curl -Ls https://sh.cd)
   -I            IP 质量
   -N            网络质量
   -A            一键全检: 硬件 → IP → 网络 (同菜单第 1 项)
-  -A -d         全部检测: 一键全检 + 深度模式 + 回程路由详情 (同菜单第 2 项)
+  -A -d         全部检测: 一键全检 + 深度模式 + Geekbench + 分省测速 + 回程详情 (同菜单第 2 项)
   -d            深度模式: 硬盘 ATTO 块大小表、回程每一跳的延迟
-  -y            缺少 sysbench / fio 时直接安装, 不询问
+  -g            Geekbench 6 跑分 (下载约 220 MB, 结果会公开上传到 Geekbench 官网)
+  -p            国内分省测速 (多数节点拦截境外来源, 国内服务器上测得全)
+  -y            缺少检测工具时直接安装, 不询问
 
   -4 / -6       只检测 IPv4 或 IPv6 (IP 质量)
   -x PROXY      通过代理检测代理的出口, 例: socks5h://user:pass@host:1080
@@ -89,8 +98,8 @@ bash <(curl -Ls https://sh.cd) -A -E -j > report.json
 ## 运行要求
 
 - bash 3.2 及以上与 curl；Linux 上检测最完整，macOS 可以跑 IP 质量和大部分网络检测
-- CPU / 内存跑分与硬盘读写需要 `sysbench`、`fio`。系统里没有时开始前询问一次，同意（或 15 秒不回答）才用系统的包管理器安装（需要 root 或免密 sudo）；不安装则用 openssl 与 dd 近似测量
-- 除此之外不安装任何软件、不修改系统；硬盘测试在当前目录（不可写时换家目录等）写入临时文件，测完删除
+- CPU / 内存跑分与硬盘读写需要 `sysbench`、`fio`；物理机读硬盘 SMART 与内存条还需要 `smartmontools`、`dmidecode`。系统里没有时开始前询问一次，同意（或 15 秒不回答）才用系统的包管理器安装（需要 root 或免密 sudo）；不安装则跳过或用 openssl 与 dd 近似测量
+- 除此之外不安装任何软件、不修改系统；硬盘测试与 Geekbench 在当前目录（不可写时换家目录等）写入临时文件，测完删除
 
 使用代理（`-x`）时，网络质量测的是本机而不是代理，所以会跳过；邮件端口检测也会跳过。
 
@@ -98,19 +107,23 @@ bash <(curl -Ls https://sh.cd) -A -E -j > report.json
 
 脚本在本机完成检测后，按阶段把结果提交到 sh.cd 生成报告：
 
-- 硬件：系统与内核版本、虚拟化类型、主板 / CPU / 显卡 / 网卡型号、内存与硬盘容量、跑分结果
+- 硬件：系统与内核版本、虚拟化类型、主板 / CPU / 显卡 / 网卡型号、内存与硬盘容量、跑分结果、温度；物理机的硬盘型号与 SMART 健康、内存条规格与厂商型号（不含序列号）
 - IP：解锁状态与地区、邮箱握手成功与否、一次性的 DNS 检测编号
-- 网络：NAT 类型与公网 IP、TCP 参数、三网延迟、回程逐跳 IP、测速结果
+- 网络：NAT 类型与公网 IP、TCP 参数、三网延迟（IPv4 / IPv6）、回程逐跳 IP、测速结果
 - 脚本版本、报告语言与是否带颜色
 
 IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定其他 IP；IP 情报由 sh.cd 向 CleanIP 查询。脚本不读取、不发送主机名、文件或登录信息。
+
+使用 `-g` 时，Geekbench 程序自己会把跑分结果公开上传到 Geekbench 官网（免费版必须上传），脚本只取结果页链接，不提交用于认领结果的私有链接。
 
 ## 数据来源与致谢
 
 - IP 情报、评分与归属：[CleanIP](https://cleanip.io)
 - BGP 邻居与 ASN 名称：[RIPEstat](https://stat.ripe.net)；IX 与机房数：[PeeringDB](https://www.peeringdb.com)
-- 回程线路的骨干网段与判定规则参考 [oneclickvirt/backtrace](https://github.com/oneclickvirt/backtrace)（Apache-2.0）
-- 测速节点来自 Speedtest 的公开节点，国内节点清单参考 [spiritLHLS/speedtest.net-CN-ID](https://github.com/spiritLHLS/speedtest.net-CN-ID) 与 [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT），逐个实测后选用；国际节点为 GSL Networks
+- 回程线路的骨干网段、IPv6 回程目标与网段清单、判定规则参考 [oneclickvirt/backtrace](https://github.com/oneclickvirt/backtrace)（Apache-2.0，网段清单见 `server/render/prefix/NOTICE`）
+- NAT 类型：按 RFC 3489 向公共 STUN 服务器探测
+- CPU 跑分：[Geekbench 6](https://www.geekbench.com)（`-g`，由 Primate Labs 提供，结果公开在 Geekbench Browser）
+- 测速节点来自 Speedtest 的公开节点，国内节点与分省节点清单参考 [spiritLHLS/speedtest.net-CN-ID](https://github.com/spiritLHLS/speedtest.net-CN-ID) 与 [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT），逐个实测后选用；国际节点为 GSL Networks
 - 三网延迟节点：zstatic 公共测试节点
 - 更新日志：[CHANGELOG.md](CHANGELOG.md) · https://sh.cd/changelog
 
@@ -120,7 +133,7 @@ IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定�
 check.sh            检测脚本, 在用户机器上运行 (bash 3.2 兼容, 只依赖 curl)
 server/main.ts      服务入口 (Bun, 无第三方依赖): 下发脚本 / 浏览器说明页 / 生成报告
 server/report.ts    按阶段解析脚本提交的字段, 调用 render/ 排版
-server/render/      终端报告排版: 硬件、IP、网络、回程判定、总览
+server/render/      终端报告排版: 硬件、IP、网络、回程判定、总览 (prefix/ 是 IPv6 骨干网段清单)
 server/upstream.ts  IP 情报、DNS 出口、BGP 数据的获取
 server/landing.ts   浏览器打开 sh.cd 时的首页
 server/changelog.ts 更新日志页 https://sh.cd/changelog
@@ -168,4 +181,4 @@ A one-line server check-up by CleanIP: hardware and benchmarks, IP quality, and 
 bash <(curl -Ls https://sh.cd) -E
 ```
 
-Run it in a terminal to open the menu. The full check-up runs hardware → IP → network straight through, shows each section as soon as it finishes, and ends with a one-screen summary. Requires bash (3.2+) and curl; sysbench and fio are installed only if you agree (or with `-y`). Run with `-h` for all options.
+Run it in a terminal to open the menu. The full check-up runs hardware → IP → network straight through, shows each section as soon as it finishes, and ends with a one-screen summary. Requires bash (3.2+) and curl; sysbench and fio (plus smartmontools and dmidecode on bare metal) are installed only if you agree (or with `-y`). `-g` adds Geekbench 6 (results are uploaded publicly to Geekbench Browser) and `-p` adds speed tests to Chinese provinces; menu option 2 / `-A -d` runs everything. Run with `-h` for all options.

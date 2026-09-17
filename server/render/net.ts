@@ -16,12 +16,18 @@ export const PLACES: Record<string, Pair> = {
 }
 const INTL_ORDER = ["hk", "tpe", "sel", "tyo", "sgp", "syd", "lax", "nyc", "fra", "ams", "lon", "par"]
 
+export type NatKind = "open" | "firewall" | "full_cone" | "restricted" | "port_restricted" | "symmetric" | "nat" | "blocked" | "fail"
+
 export interface NetData {
-  nat: { kind: "open" | "nat" | "fail", ip: string } | null
+  nat: { kind: NatKind, ip: string } | null
   tcp: string[] | null
   v6: boolean | null
   latency: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
+  latency6: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
   routes: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
+  routes6: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
+  /** 分省测速: null = 该组节点都连不上 */
+  speedCn: Array<{ province: string, carrier: Carrier, result: { city: string, down: number | "stall" | null, up: number | "stall" | null } | null }>
   /** null = 连接失败, "stall" = 节点不收发 (多为节点对来源限制) */
   speed: Array<{ carrier: "near" | "intl" | Carrier, place: string, down: number | "stall" | null, up: number | "stall" | null }>
   intl: Array<{ place: string, ms: number | null }>
@@ -55,41 +61,53 @@ const IPV4 = String.raw`(?:\d{1,3}\.){3}\d{1,3}`
 
 export function parseNet(body: Record<string, unknown>): NetData | null {
   const keys = Object.keys(body)
-  if (!keys.some((k) => /^(nt_|lat_|rt_|sp_|il_)/.test(k))) return null
-  const data: NetData = { nat: null, tcp: null, v6: null, latency: [], routes: [], speed: [], intl: [], deep: body.deep === "1", dur: num(str(body.dur)) }
+  if (!keys.some((k) => /^(nt_|lat6?_|rt6?_|sp_|spc_|il_)/.test(k))) return null
+  const data: NetData = {
+    nat: null, tcp: null, v6: null, latency: [], latency6: [], routes: [], routes6: [], speed: [], speedCn: [], intl: [],
+    deep: body.deep === "1", dur: num(str(body.dur)),
+  }
 
-  const nat = new RegExp(`^(open|nat)\\|(${IPV4})$`).exec(str(body.nt_nat))
-  if (nat) data.nat = { kind: nat[1] as "open" | "nat", ip: nat[2]! }
+  const nat = new RegExp(`^(open|firewall|full_cone|restricted|port_restricted|symmetric|nat)\\|(${IPV4})$`).exec(str(body.nt_nat))
+  if (nat) data.nat = { kind: nat[1] as NatKind, ip: nat[2]! }
+  else if (body.nt_nat === "blocked|") data.nat = { kind: "blocked", ip: "" }
   else if (body.nt_nat === "fail") data.nat = { kind: "fail", ip: "" }
   data.tcp = textParts(body.nt_tcp, 4, 60)
   if (body.nt_v6 === "yes" || body.nt_v6 === "no") data.v6 = body.nt_v6 === "yes"
 
-  for (const [prov] of PROVINCES) {
-    for (const carrier of CARRIERS) {
-      const v = str(body[`lat_${prov}_${carrier}`])
-      if (!/^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4}$/.test(v)) continue
-      data.latency.push({ province: prov, carrier, samples: v.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) })
+  for (const [key, list] of [["lat", data.latency], ["lat6", data.latency6]] as const) {
+    for (const [prov] of PROVINCES) {
+      for (const carrier of CARRIERS) {
+        const v = str(body[`${key}_${prov}_${carrier}`])
+        if (!/^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4}$/.test(v)) continue
+        list.push({ province: prov, carrier, samples: v.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) })
+      }
     }
   }
 
-  const hopRe = new RegExp(`^\\d{1,2}:${IPV4}(:\\d{1,4})?$`)
-  for (const [city] of ROUTE_CITIES) {
-    for (const carrier of CARRIERS) {
-      const v = str(body[`rt_${city}_${carrier}`])
-      if (v === "none") {
-        data.routes.push({ city, carrier, hops: [] })
-        continue
+  // IPv4 跳点 TTL:IP[:毫秒]; IPv6 地址本身带冒号, 用斜杠 TTL/IP[/毫秒]
+  const routeSets = [
+    { key: "rt", list: data.routes, sep: ":", re: new RegExp(`^\\d{1,2}:${IPV4}(:\\d{1,4})?$`) },
+    { key: "rt6", list: data.routes6, sep: "/", re: /^\d{1,2}\/[0-9a-fA-F:]{2,39}(\/\d{1,4})?$/ },
+  ]
+  for (const { key, list, sep, re } of routeSets) {
+    for (const [city] of ROUTE_CITIES) {
+      for (const carrier of CARRIERS) {
+        const v = str(body[`${key}_${city}_${carrier}`])
+        if (v === "none") {
+          list.push({ city, carrier, hops: [] })
+          continue
+        }
+        const parts = v.split(",")
+        if (!v || parts.length > 60 || !parts.every((p) => re.test(p))) continue
+        list.push({
+          city,
+          carrier,
+          hops: parts.map((p) => {
+            const [ttl, ip, ms] = p.split(sep)
+            return { ttl: Number(ttl), ip: ip!, ...(ms !== undefined ? { ms: Number(ms) } : {}) }
+          }),
+        })
       }
-      const parts = v.split(",")
-      if (!v || parts.length > 60 || !parts.every((p) => hopRe.test(p))) continue
-      data.routes.push({
-        city,
-        carrier,
-        hops: parts.map((p) => {
-          const [ttl, ip, ms] = p.split(":")
-          return { ttl: Number(ttl), ip: ip!, ...(ms !== undefined ? { ms: Number(ms) } : {}) }
-        }),
-      })
     }
   }
 
@@ -99,6 +117,20 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
     if (m[1] !== "near" && !PLACES[m[2]!]) continue
     const val = (v: string) => (v === "fail" ? null : v === "stall" ? "stall" as const : Number(v))
     data.speed.push({ carrier: m[1] as NetData["speed"][number]["carrier"], place: m[2]!.trim(), down: val(m[3]!), up: val(m[4]!) })
+  }
+
+  for (const [prov] of PROVINCES) {
+    for (const carrier of CARRIERS) {
+      const v = str(body[`spc_${prov}_${carrier}`])
+      if (v === "fail") {
+        data.speedCn.push({ province: prov, carrier, result: null })
+        continue
+      }
+      const m = /^([\p{Script=Han}]{1,6})\|(\d{1,6}(?:\.\d)?|fail|stall)\|(\d{1,6}(?:\.\d)?|fail|stall)$/u.exec(v)
+      if (!m) continue
+      const val = (x: string) => (x === "fail" ? null : x === "stall" ? "stall" as const : Number(x))
+      data.speedCn.push({ province: prov, carrier, result: { city: m[1]!, down: val(m[2]!), up: val(m[3]!) } })
+    }
   }
 
   for (const place of INTL_ORDER) {
@@ -116,6 +148,9 @@ const T = {
   open: ["公网直连", "Public IP"],
   natted: ["在 NAT 后", "Behind NAT"],
   natFail: ["未测出 (出站 UDP 可能被拦截)", "Unknown (outbound UDP may be blocked)"],
+  cnSpeed: ["分省测速", "Provincial speed (China)"],
+  cnSpeedNote: ["国内 Speedtest 节点, 下载 / 上传 Mbps; 多数节点拦截境外来源", "Down / up Mbps; most servers block traffic from abroad"],
+  unreachable: ["不可达", "blocked"],
   exitIp: ["出口", "exit"],
   tcp: ["TCP", "TCP"],
   cc: ["拥塞控制", "congestion"],
@@ -157,6 +192,18 @@ const T = {
   private: ["内网", "private"],
 } satisfies Record<string, Pair>
 
+// NAT 类型: [名称, 色调, 补充说明]
+const NAT_KINDS: Partial<Record<NatKind, [Pair, Tone, Pair | null]>> = {
+  open: [["公网直连", "Public IP"], "good", null],
+  firewall: [["公网直连, UDP 受限", "Public IP, UDP filtered"], "warn", ["入站 UDP 被过滤, P2P 与游戏联机可能受影响", "Inbound UDP is filtered; some P2P and games are affected"]],
+  full_cone: [["全锥形 NAT (NAT1)", "Full cone (NAT1)"], "good", ["任何外部地址都能回连, P2P 最友好", "Reachable from any outside address; best for P2P"]],
+  restricted: [["限制锥形 NAT (NAT2)", "Restricted cone (NAT2)"], "good", ["只接受访问过的 IP 回连", "Only IPs you contacted can reach back"]],
+  port_restricted: [["端口限制锥形 NAT (NAT3)", "Port-restricted (NAT3)"], "warn", ["只接受访问过的 IP 与端口回连, P2P 较难打通", "Only contacted IP:port can reach back; P2P is harder"]],
+  symmetric: [["对称形 NAT (NAT4)", "Symmetric (NAT4)"], "bad", ["每个目标换一个外部端口, P2P 基本打不通", "New external port per destination; P2P rarely works"]],
+  nat: [["在 NAT 后", "Behind NAT"], "warn", ["类型未测全: 细分所需的 STUN 服务器连不上", "Type unknown: the STUN servers needed are unreachable"]],
+  blocked: [["UDP 不通", "UDP blocked"], "bad", ["出站 UDP 被拦截, 语音视频与游戏联机可能受影响", "Outbound UDP is blocked; calls and games may fail"]],
+}
+
 function latencyTone(ms: number): Tone {
   // 境外到国内 150ms 上下是常态, 只把明显好的标绿、明显差的标黄
   return ms < 100 ? "good" : ms < 200 ? "neutral" : "warn"
@@ -188,9 +235,14 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   if (net.nat || net.tcp || net.v6 !== null) {
     title(T.local)
     if (net.nat) {
-      if (net.nat.kind === "open") put(L(T.nat), `${badge(L(T.open), "good")}  ${paint(R.ip(net.nat.ip), "gray")}`)
-      else if (net.nat.kind === "nat") put(L(T.nat), `${badge(L(T.natted), "warn")}  ${paint(`${L(T.exitIp)} ${R.ip(net.nat.ip)}`, "gray")}`)
-      else put(L(T.nat), paint(L(T.natFail), "gray"))
+      const kind = NAT_KINDS[net.nat.kind]
+      if (!kind) put(L(T.nat), paint(L(T.natFail), "gray"))
+      else {
+        const exit = net.nat.ip ? paint(`${net.nat.kind === "open" || net.nat.kind === "firewall" ? "" : `${L(T.exitIp)} `}${R.ip(net.nat.ip)}`, "gray") : ""
+        // 用 " · " 连接, 英文类型名较长时出口 IP 自动折到下一行
+        put(L(T.nat), [badge(L(kind[0]), kind[1]), exit].filter(Boolean).join(" · "))
+        if (kind[2]) wrap(L(kind[2]), VW).forEach((l) => put("", paint(l, "gray")))
+      }
     }
     if (net.tcp) {
       const [cc, qd, rmem, wmem] = net.tcp
@@ -238,15 +290,16 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     out.push(hr())
   }
 
-  // —— 三网延迟 ——
-  if (net.latency.length) {
+  // —— 三网延迟 (IPv4 / IPv6) ——
+  const latencyTable = (rows: NetData["latency"], heading: string) => {
+    if (!rows.length) return
     const LABEL = zh ? 10 : 16
     const COL = 15
-    title(T.latency, L(T.latencyNote))
+    out.push(`  ${paint(heading, "bold")}`, `  ${paint(L(T.latencyNote), "gray")}`)
     out.push(`  ${pad("", LABEL)}${paint(CARRIERS.map((c) => pad(L(T[c]), COL)).join("").trimEnd(), "gray")}`)
     const medians: Record<string, number[]> = { ct: [], cu: [], cm: [] }
     for (const [code, pzh, pen] of PROVINCES) {
-      const cells = net.latency.filter((x) => x.province === code)
+      const cells = rows.filter((x) => x.province === code)
       if (!cells.length) continue
       const value = rtrim(CARRIERS.map((c) => {
         const cell = cells.find((x) => x.carrier === c)
@@ -269,15 +322,18 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     if (avg.length) out.push(`  ${pad(L(T.avg), LABEL)}${paint(`${avg.join(" · ")} ms`, "bold")}`)
     out.push(hr())
   }
+  latencyTable(net.latency, L(T.latency))
+  latencyTable(net.latency6, `${L(T.latency)} · IPv6`)
 
-  // —— 三网回程线路 ——
-  if (net.routes.length) {
+  // —— 三网回程线路 (IPv4 / IPv6) ——
+  const routeTable = (rows: NetData["routes"], heading: string) => {
+    if (!rows.length) return
     const COL = 15
     const LABEL = zh ? 10 : 16
-    title(T.routes)
+    out.push(`  ${paint(heading, "bold")}`)
     out.push(`  ${pad("", LABEL)}${paint(CARRIERS.map((c) => pad(L(T[c]), COL)).join("").trimEnd(), "gray")}`)
     for (const [code, czh, cen] of ROUTE_CITIES) {
-      const cells = net.routes.filter((x) => x.city === code)
+      const cells = rows.filter((x) => x.city === code)
       if (!cells.length) continue
       const value = rtrim(CARRIERS.map((c) => {
         const r = cells.find((x) => x.carrier === c)
@@ -292,6 +348,8 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     out.push(`  ${paint(L(T.routeLegend), "gray")}`)
     out.push(hr())
   }
+  routeTable(net.routes, L(T.routes))
+  routeTable(net.routes6, `${L(T.routes)} · IPv6`)
 
   // —— 带宽测速 ——
   if (net.speed.length) {
@@ -314,6 +372,27 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     // 没有节点的运营商如实写出来, 不拿别的节点冒充
     const missing = CARRIERS.filter((c) => !net.speed.some((s) => s.carrier === c))
     if (missing.length) out.push(`  ${pad(missing.map((c) => L(T[c])).join(" · "), LABEL)}${paint(L(T.noNode), "gray")}`)
+    out.push(hr())
+  }
+
+  // —— 分省测速 ——
+  if (net.speedCn.length) {
+    const LABEL = zh ? 10 : 16
+    const COL = 15
+    out.push(`  ${paint(L(T.cnSpeed), "bold")}`, `  ${paint(L(T.cnSpeedNote), "gray")}`)
+    out.push(`  ${pad("", LABEL)}${paint(CARRIERS.map((c) => pad(L(T[c]), COL)).join("").trimEnd(), "gray")}`)
+    const v = (x: number | "stall" | null) => (typeof x === "number" ? String(Math.round(x)) : x === "stall" ? (zh ? "受限" : "ltd") : "-")
+    for (const [code, pzh, pen] of PROVINCES) {
+      const cells = net.speedCn.filter((x) => x.province === code)
+      if (!cells.length) continue
+      const value = rtrim(CARRIERS.map((c) => {
+        const cell = cells.find((x) => x.carrier === c)
+        if (!cell) return pad("", COL)
+        if (!cell.result) return paint(pad(L(T.unreachable), COL), "gray")
+        return pad(`${v(cell.result.down)} / ${v(cell.result.up)}`, COL)
+      }).join(""))
+      out.push(`  ${pad(fit(zh ? pzh : pen, LABEL - 1), LABEL)}${value}`)
+    }
     out.push(hr())
   }
 
@@ -348,24 +427,36 @@ export function renderRouteDetail(R: Renderer, net: NetData, hops: Record<string
   const { L, paint, tonePaint, hr, lang } = R
   const zh = lang === "zh"
   const out: string[] = []
-  for (const [code, czh, cen] of ROUTE_CITIES) {
-    for (const carrier of CARRIERS) {
-      const r = net.routes.find((x) => x.city === code && x.carrier === carrier)
-      if (!r) continue
-      const cls = r.hops.length ? classifyRoute(carrier, r.hops) : null
-      const head = `${zh ? `${czh}${L(T[carrier])}` : `${L(T[carrier])} ${cen}`}`
-      out.push(`  ${paint(head, "bold")}  ${cls ? (cls.code === "unknown" ? paint(L(cls.label), "gray") : tonePaint(L(cls.label), cls.tone, "bold")) : paint(L(T.routeNone), "gray")}`)
-      for (const h of r.hops) {
-        const info = hops[h.ip]
-        const backbone = hopAsn(h.ip)
-        const asn = backbone ?? (info?.asn ? `AS${info.asn}` : "")
-        const name = backbone ? L(BACKBONE[backbone]!) : info?.org ? fit(info.org, 16) : ""
-        const where = PRIVATE.test(h.ip) ? L(T.private) : info?.place ?? ""
-        const ms = h.ms !== undefined ? padL(`${h.ms} ms`, 7) : padL("", 7)
-        const tail = fit([asn, name, where].filter(Boolean).join(" · "), W - 2 - 3 - 16 - 7 - 2)
-        out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${pad(R.ip(h.ip), 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`)
+  const TAIL = W - 2 - 3 - 16 - 7 - 2
+  for (const [family, routes] of [["IPv4", net.routes], ["IPv6", net.routes6]] as const) {
+    if (!routes.length) continue
+    if (family === "IPv6") out.push(`  ${paint("IPv6", "bold")}`, "")
+    for (const [code, czh, cen] of ROUTE_CITIES) {
+      for (const carrier of CARRIERS) {
+        const r = routes.find((x) => x.city === code && x.carrier === carrier)
+        if (!r) continue
+        const cls = r.hops.length ? classifyRoute(carrier, r.hops) : null
+        const head = `${zh ? `${czh}${L(T[carrier])}` : `${L(T[carrier])} ${cen}`}`
+        out.push(`  ${paint(head, "bold")}  ${cls ? (cls.code === "unknown" ? paint(L(cls.label), "gray") : tonePaint(L(cls.label), cls.tone, "bold")) : paint(L(T.routeNone), "gray")}`)
+        for (const h of r.hops) {
+          const info = hops[h.ip]
+          const backbone = hopAsn(h.ip)
+          const asn = backbone ?? (info?.asn ? `AS${info.asn}` : "")
+          const name = backbone ? L(BACKBONE[backbone]!) : info?.org ? fit(info.org, 16) : ""
+          const where = PRIVATE.test(h.ip) || /^f[cd]|^fe80/i.test(h.ip) ? L(T.private) : info?.place ?? ""
+          const ms = h.ms !== undefined ? padL(`${h.ms} ms`, 7) : padL("", 7)
+          const tail = fit([asn, name, where].filter(Boolean).join(" · "), TAIL)
+          const shown = R.ip(h.ip)
+          if (width(shown) <= 16) {
+            out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${pad(shown, 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`)
+          } else {
+            // IPv6 地址放不进 16 列: 地址单独一行, 延迟与归属缩进到下一行
+            out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${fit(shown, W - 5)}`)
+            out.push(`     ${pad("", 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`.trimEnd())
+          }
+        }
+        out.push("")
       }
-      out.push("")
     }
   }
   if (out.at(-1) === "") out.pop()

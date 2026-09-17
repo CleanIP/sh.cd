@@ -2,6 +2,23 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.3.0 · 2026-09-18
+
+### Added
+
+- Bare metal: disk SMART health, power-on time, temperature, wear and total writes, with a warning when sectors are reallocated
+- Bare metal: memory slots, maximum capacity, ECC, and size, type, speed and part number of each module
+- CPU, disk and board temperatures when the system exposes them
+- Geekbench 6 with `-g` (included in all checks); results are uploaded publicly as Geekbench requires and the report links to them; skipped with a reason when memory, disk space or download speed is too low
+- NAT type now distinguishes open internet, firewall, full cone (NAT1), restricted (NAT2), port-restricted (NAT3) and symmetric (NAT4), with notes on gaming and P2P
+- With IPv6, latency and return routes to the three Chinese carriers are also measured over IPv6; route details show IPv4 and IPv6 separately and the summary adds the IPv6 average
+- Speed tests to Chinese provinces with `-p` (included in all checks): three carriers in Beijing, Tianjin, Shanghai, Jiangsu, Zhejiang, Fujian, Hubei, Hunan and Sichuan; unreachable servers are marked
+- On bare metal, smartmontools and dmidecode are offered for install together with sysbench and fio
+
+### Fixed
+
+- Long latency lines in the summary wrap by display width instead of overflowing the report
+
 ## v1.2.0 · 2026-09-17
 
 ### Added

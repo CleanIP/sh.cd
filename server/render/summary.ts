@@ -29,6 +29,21 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
   const VW = W - 2 - LABEL
   const out: string[] = []
   const line = (label: string, value: string) => out.push(`  ${paint(pad(label, LABEL), "gray")}${value}`)
+  // 多段 " · " 拼起来超出列宽时折行 (按去掉颜色控制符后的宽度算), 后续行不带标签
+  const lines = (label: string, parts: string[]) => {
+    const plain = (x: string) => width(x.replace(/\x1b\[[\d;]*m/g, ""))
+    let cur: string[] = []
+    let first = true
+    for (const part of parts) {
+      if (cur.length && plain([...cur, part].join(" · ")) > VW) {
+        line(first ? label : "", cur.join(" · "))
+        first = false
+        cur = []
+      }
+      cur.push(part)
+    }
+    if (cur.length) line(first ? label : "", cur.join(" · "))
+  }
 
   const took = parts.took >= 60 ? (zh ? `${Math.floor(parts.took / 60)} 分 ${parts.took % 60} 秒` : `${Math.floor(parts.took / 60)}m ${parts.took % 60}s`) : zh ? `${parts.took} 秒` : `${parts.took}s`
   const head = L(T.title)
@@ -112,6 +127,8 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
     const b: string[] = []
     const meds = net.latency.map((x) => median(rttSamples(x.samples).values.filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
     if (meds.length) b.push(`${zh ? "三网平均" : "China avg"} ${paint(`${Math.round(meds.reduce((s, m) => s + m, 0) / meds.length)} ms`, "bold")}`)
+    const meds6 = net.latency6.map((x) => median(rttSamples(x.samples).values.filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
+    if (meds6.length) b.push(`IPv6 ${paint(`${Math.round(meds6.reduce((s, m) => s + m, 0) / meds6.length)} ms`, "bold")}`)
     // 本机带宽: 就近节点上下行正常 (相差不到 5 倍) 就用它; 否则就近节点多半自己限速
     // (2026-09-17 香港机排到新竹, 下载 45 Mbps、上传 1.15 Gbps), 改取境外节点里上下行较小值最大的一个。
     // 国内节点从境外测普遍受限, 不参与。
@@ -121,7 +138,7 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
     const near = both.find((s) => s.carrier === "near" && balanced(s))
     const best = near ?? both.filter((s) => s.carrier === "near" || s.carrier === "intl").sort((x, y) => Math.min(y.down, y.up) - Math.min(x.down, x.up))[0]
     if (best) b.push(`${zh ? "带宽" : "bandwidth"} ${paint(`${fmtMbps(best.down)} / ${fmtMbps(best.up)}`, "bold")}`)
-    if (b.length) line(a.length ? "" : L(T.net), b.join(" · "))
+    if (b.length) lines(a.length ? "" : L(T.net), b)
   }
   // 底线带上入口命令: 截图分享出去, 别人照着就能跑
   const cmd = "bash <(curl -Ls https://sh.cd)"

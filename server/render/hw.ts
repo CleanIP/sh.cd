@@ -28,8 +28,47 @@ export interface HwData {
     disk: Record<string, Parts>
     atto: Array<[size: string, parts: string[]]>
     dd: Parts
+    /** Geekbench: [版本, 状态, 单核, 多核, 结果页] */
+    gb: Parts
   }
+  /** 温度 (°C), 每类一个 */
+  temps: Array<{ kind: string, c: number }>
+  /** 物理机硬盘 SMART */
+  smart: SmartDisk[]
+  /** 物理机内存插槽: 最大容量字节 | 插槽数 | 纠错 */
+  dimmArray: Parts
+  dimms: Dimm[]
+  /** 物理机上没有 root, 读不了 SMART 与内存条 */
+  noRoot: boolean
   dur: number | null
+}
+
+export interface SmartDisk {
+  proto: string
+  model: string
+  bytes: number | null
+  kind: string
+  health: string
+  hours: number | null
+  temp: number | null
+  used: number | null
+  written: number | null
+  realloc: number | null
+  pending: number | null
+  uncorrect: number | null
+  mediaErr: number | null
+}
+
+export interface Dimm {
+  count: number
+  bytes: number
+  type: string
+  speed: number | null
+  conf: number | null
+  maker: string
+  part: string
+  rank: number | null
+  form: string
 }
 
 const list = (v: unknown) => {
@@ -66,8 +105,44 @@ export function parseHw(body: Record<string, unknown>): HwData | null {
       disk: Object.fromEntries(["r4q1", "r4q32", "s1q1", "s1q8"].map((k) => [k, textParts(body[`bn_${k}`], 4, 20)])),
       atto: ATTO_SIZES.map((s) => [s, textParts(body[`bn_atto_${s}`], 4, 20)] as const).filter((x): x is [string, string[]] => !!x[1]),
       dd: textParts(body.bn_dd, 3, 24),
+      gb: parseGb(str(body.bn_gb)),
     },
+    temps: str(body.hw_temp).split(",").map((x) => /^(cpu|nvme|disk|gpu|board):(\d{1,3}(?:\.\d)?)$/.exec(x)).filter((m): m is RegExpExecArray => !!m).map((m) => ({ kind: m[1]!, c: Number(m[2]) })),
+    smart: Array.from({ length: 8 }, (_, i) => parseSmart(str(body[`sm_${i + 1}`]))).filter((x): x is SmartDisk => !!x),
+    dimmArray: textParts(body.mm_array, 3, 40),
+    dimms: Array.from({ length: 6 }, (_, i) => parseDimm(str(body[`mm_${i + 1}`]))).filter((x): x is Dimm => !!x),
+    noRoot: str(body.hw_noroot) === "1",
     dur: num(str(body.dur)),
+  }
+}
+
+const okText = (s: string | undefined, max = 60) => (s !== undefined && s.length <= max && !/[\x00-\x1f\x7f]/.test(s) ? s.trim() : "")
+const optNum = (s: string | undefined) => (s && /^\d{1,20}$/.test(s) ? Number(s) : null)
+
+function parseGb(v: string): Parts {
+  const m = /^(\d+\.\d+\.\d+)\|(ok|unsupported|lowmem|nospace|download|fail)(?:\|(\d{0,6})\|(\d{0,7})\|(https:\/\/browser\.geekbench\.com\/v6\/cpu\/\d{1,12}))?$/.exec(v)
+  return m ? [m[1]!, m[2]!, m[3] ?? "", m[4] ?? "", m[5] ?? ""] : null
+}
+
+function parseSmart(v: string): SmartDisk | null {
+  if (!v || v.length > 300) return null
+  const p = v.split("|")
+  if (p.length !== 13 || !/^(nvme|ata|scsi|)$/.test(p[0]!) || !/^(nvme|ssd|hdd|)$/.test(p[3]!) || !/^(pass|fail|)$/.test(p[4]!)) return null
+  const model = okText(p[1])
+  if (!model) return null
+  return {
+    proto: p[0]!, model, bytes: optNum(p[2]), kind: p[3]!, health: p[4]!, hours: optNum(p[5]), temp: optNum(p[6]),
+    used: optNum(p[7]), written: optNum(p[8]), realloc: optNum(p[9]), pending: optNum(p[10]), uncorrect: optNum(p[11]), mediaErr: optNum(p[12]),
+  }
+}
+
+function parseDimm(v: string): Dimm | null {
+  if (!v || v.length > 200) return null
+  const p = v.split("|")
+  if (p.length !== 9 || !/^\d{1,3}$/.test(p[0]!) || !/^\d{1,15}$/.test(p[1]!)) return null
+  return {
+    count: Number(p[0]), bytes: Number(p[1]), type: okText(p[2], 20), speed: optNum(p[3]), conf: optNum(p[4]),
+    maker: okText(p[5], 30), part: okText(p[6], 30), rank: optNum(p[7]), form: okText(p[8], 20),
   }
 }
 
@@ -144,7 +219,25 @@ const T = {
   noTools: ["未安装 sysbench / fio，以下为系统自带工具的近似值", "sysbench / fio not installed; rough built-in measurements"],
   approx: ["近似", "approx."],
   atto: ["ATTO 块大小", "ATTO block sizes"],
+  temp: ["温度", "Temperature"],
+  modules: ["内存条", "Modules"],
+  slots: ["插槽", "Slots"],
+  health: ["健康", "Health"],
+  noRoot: ["需要 root 才能读取硬盘健康与内存条", "Root is needed to read disk health and memory modules"],
+  gbSkip: ["Geekbench", "Geekbench"],
 } satisfies Record<string, Pair>
+
+const TEMP_NAMES: Record<string, Pair> = { cpu: ["CPU", "CPU"], nvme: ["NVMe", "NVMe"], disk: ["硬盘", "Disk"], gpu: ["显卡", "GPU"], board: ["主板", "Board"] }
+// 超过这个温度标黄: CPU 85°C, NVMe 70°C, 机械盘 50°C
+const TEMP_WARN: Record<string, number> = { cpu: 85, nvme: 70, disk: 50, gpu: 85, board: 70 }
+
+const GB_SKIP: Record<string, Pair> = {
+  unsupported: ["不支持此架构, 已跳过", "unsupported architecture, skipped"],
+  lowmem: ["内存加 Swap 不足 1.5 GB, 已跳过", "less than 1.5 GB memory + swap, skipped"],
+  nospace: ["磁盘剩余不足 1 GB, 已跳过", "less than 1 GB free disk, skipped"],
+  download: ["下载太慢或失败, 已跳过", "download too slow or failed, skipped"],
+  fail: ["运行或上传失败", "run or upload failed"],
+}
 
 const CASES: Array<[key: string, label: Pair]> = [
   ["r4q1", ["4K 随机 Q1", "4K rand Q1"]],
@@ -196,6 +289,9 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
   if (hw.tz) {
     const off = /^[+-]\d{4}$/.test(hw.tz[1]!) ? ` (UTC${hw.tz[1]!.slice(0, 3)}:${hw.tz[1]!.slice(3)})` : ""
     put(L(T.tz), fit(`${hw.tz[0]}${off}${hw.tz[2] ? ` · ${hw.tz[2]}` : ""}`, VW))
+  }
+  if (hw.temps.length) {
+    put(L(T.temp), hw.temps.map((t) => `${L(TEMP_NAMES[t.kind]!)} ${tonePaint(`${Math.round(t.c)}°C`, t.c >= (TEMP_WARN[t.kind] ?? 85) ? "warn" : "neutral")}`).join(" · "))
   }
   out.push(hr())
 
@@ -264,6 +360,20 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
       put("", paint(zh ? "openssl SHA-256 吞吐, 未装 sysbench 时的近似值" : "openssl SHA-256 throughput (sysbench not installed)", "gray"))
     }
   }
+  if (hw.bench.gb) {
+    const [ver, status, single, multi, url] = hw.bench.gb
+    const label = `Geekbench ${ver!.split(".")[0]}`
+    if (status === "ok" && single && multi) {
+      put(label, `${L(T.single)} ${paint(single, "bold")} · ${L(T.multi)} ${paint(multi, "bold")}`)
+    } else if (status === "ok") {
+      // 结果页有人机验证, 脚本读不到分数, 请用户在浏览器里打开
+      put(label, zh ? "已上传, 在浏览器打开结果页查看单核 / 多核分" : "Uploaded; see scores on the result page")
+    } else {
+      put(label, paint(L(GB_SKIP[status!] ?? GB_SKIP.fail!), "gray"))
+    }
+    // 链接比值列宽, 单独一行少缩进, 保证完整可点
+    if (url) out.push(`  ${paint(url, "brand", "underline")}`)
+  }
   out.push(hr())
 
   // —— 内存 ——
@@ -298,6 +408,23 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
     // 旧版脚本交的 dd 数值不是内存带宽, 不显示
     if (tool === "sysbench") put(L(T.memBench), `${L(T.read)} ${paint(mib(r), "bold")} · ${L(T.write)} ${paint(mib(w), "bold")}`)
   }
+  if (hw.dimmArray) {
+    const [maxB, slots, ecc] = hw.dimmArray
+    const installed = hw.dimms.reduce((n, m) => n + m.count, 0)
+    const bits: string[] = []
+    if (num(slots)) bits.push(zh ? `${slots} 个 · 已插 ${installed}` : `${slots} · ${installed} used`)
+    if (num(maxB)) bits.push(zh ? `最大 ${fmtBytes(num(maxB)!)}` : `max ${fmtBytes(num(maxB)!)}`)
+    if (ecc && !/^None$/i.test(ecc)) bits.push(tonePaint(ecc, /ECC/i.test(ecc) ? "good" : "neutral"))
+    if (bits.length) put(L(T.slots), bits.join(" · "))
+  }
+  hw.dimms.forEach((m, i) => {
+    const speed = m.speed ? `-${m.speed}` : ""
+    const conf = m.conf && m.speed && m.conf !== m.speed ? paint(zh ? ` 运行 ${m.conf}` : ` at ${m.conf}`, "gray") : ""
+    put(i ? "" : L(T.modules), `${m.count} × ${fmtBytes(m.bytes)} ${m.type}${speed}${conf}`)
+    const who = [m.maker, m.part, m.rank ? `${m.rank}R` : ""].filter(Boolean).join(" · ")
+    if (who) put("", paint(fit(who, VW), "gray"))
+  })
+  if (hw.noRoot) put("", paint(L(T.noRoot), "gray"))
   out.push(hr())
 
   // —— 硬盘 ——
@@ -315,6 +442,23 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
     put(L(T.capacity), bits.join(" · "))
     // 虚拟磁盘的「是否机械盘」标志常常误报 (virtio 默认报 1), 只对物理机显示 SSD / HDD
     if (dev) put(L(T.device), `${dev}${!isVm && type ? ` · ${type.toUpperCase()}` : ""}`)
+  }
+  for (const d of hw.smart) {
+    const kind = d.kind === "nvme" ? "NVMe" : d.kind.toUpperCase()
+    putWrapped(L(T.model), [d.model, d.bytes ? fmtBytes(d.bytes) : "", kind].filter(Boolean).join(" · "))
+    const bits: string[] = []
+    bits.push(d.health === "pass" ? tonePaint(zh ? "✓ 通过" : "✓ passed", "good") : d.health === "fail" ? tonePaint(zh ? "✗ 未通过" : "✗ failed", "bad") : paint(zh ? "未知" : "unknown", "gray"))
+    if (d.hours !== null) bits.push(zh ? `通电 ${d.hours.toLocaleString("en-US")} 小时` : `${d.hours.toLocaleString("en-US")} h on`)
+    if (d.temp !== null) bits.push(tonePaint(`${d.temp}°C`, d.temp >= (d.kind === "hdd" ? 50 : 70) ? "warn" : "neutral"))
+    if (d.used !== null) bits.push(tonePaint(zh ? `寿命已用 ${d.used}%` : `${d.used}% worn`, d.used >= 90 ? "bad" : d.used >= 70 ? "warn" : "neutral"))
+    if (d.written !== null) bits.push(zh ? `写入 ${fmtBytes(d.written)}` : `${fmtBytes(d.written)} written`)
+    put(L(T.health), bits.join(" · "))
+    const errs: string[] = []
+    if (d.realloc) errs.push(zh ? `重映射 ${d.realloc}` : `reallocated ${d.realloc}`)
+    if (d.pending) errs.push(zh ? `待映射 ${d.pending}` : `pending ${d.pending}`)
+    if (d.uncorrect) errs.push(zh ? `无法修复 ${d.uncorrect}` : `uncorrectable ${d.uncorrect}`)
+    if (d.mediaErr) errs.push(zh ? `介质错误 ${d.mediaErr}` : `media errors ${d.mediaErr}`)
+    if (errs.length) put("", tonePaint(`! ${errs.join(" · ")}`, "warn"))
   }
   // 先按终端列宽补齐纯文本再上色, 控制符不能算进宽度
   const padL = (s: string, w: number) => " ".repeat(Math.max(0, w - width(s))) + s

@@ -125,15 +125,15 @@ const COPY: Record<Lang, Copy> = {
     stages: [
       {
         name: "硬件与性能", flag: "-H", time: "约 1–2 分钟",
-        items: ["系统、内核与虚拟化类型", "CPU 型号、缓存与指令集", "sysbench 单核 / 多核跑分", "内存容量、超开迹象与读写带宽", "fio 4K 随机与顺序读写", "ATTO 块大小表（-d）"],
+        items: ["系统、内核、虚拟化与温度", "CPU 型号、缓存与指令集", "sysbench 跑分，Geekbench 6（-g）", "内存容量与读写带宽", "fio 4K 与顺序读写，ATTO 表（-d）", "物理机硬盘 SMART 与内存条规格"],
       },
       {
         name: "IP 质量", flag: "-I", time: "约 30 秒",
         items: ["归属、原生或广播、IP 类型", "纯净度、综合与风险评分", "VPN / 代理 / Tor / 滥用多源检测", "Netflix、ChatGPT 等 9 项解锁", "25 端口与 12 家邮箱握手", "DNS 出口与各平台适用分"],
       },
       {
-        name: "网络质量", flag: "-N", time: "约 3 分钟",
-        items: ["NAT 类型与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟走势", "CN2 GIA / 9929 / CMIN2 回程识别", "国内三网与 6 个国际节点测速", "12 个国际节点延迟"],
+        name: "网络质量", flag: "-N", time: "约 3–5 分钟",
+        items: ["NAT 类型（NAT1–4）与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟，IPv4 与 IPv6", "CN2 GIA / 9929 / CMIN2 回程，含 IPv6", "三网与国际测速，分省测速（-p）", "12 个国际节点延迟"],
       },
     ],
     optionsTitle: "参数",
@@ -141,10 +141,12 @@ const COPY: Record<Lang, Copy> = {
     options: [
       ["不带参数", "进入菜单；1 一键全检，2 全部检测"],
       ["-A", "跳过菜单，直接一键全检"],
-      ["-A -d", "全部检测：一键全检 + 深度模式 + 回程逐跳详情"],
+      ["-A -d", "全部检测：一键全检加深度模式、Geekbench、分省测速与回程详情"],
       ["-H  -I  -N", "只测硬件与性能 / IP 质量 / 网络质量"],
       ["-d", "深度模式：硬盘 ATTO 表、回程每一跳的延迟"],
-      ["-y", "缺少 sysbench / fio 时直接安装"],
+      ["-g", "Geekbench 6 跑分，结果会公开上传到 Geekbench 官网"],
+      ["-p", "国内分省测速，多数节点不接受境外连接"],
+      ["-y", "缺少检测工具时直接安装"],
       ["-4  -6", "只检测 IPv4 或 IPv6 的 IP 质量"],
       ["-x PROXY", "检测代理的出口，例 socks5h://127.0.0.1:1080"],
       ["-S LIST", "跳过部分检测：bench,media,mail,dns,latency,route,speed"],
@@ -161,14 +163,15 @@ const COPY: Record<Lang, Copy> = {
     requireTitle: "运行要求",
     require: [
       "bash 3.2 及以上与 curl；Linux 上检测最完整，macOS 可测 IP 质量和大部分网络项目。",
-      "CPU / 内存跑分与硬盘读写需要 sysbench、fio：缺少时开始前询问一次，15 秒不回答默认安装；不安装则用系统自带工具近似测量。",
-      "除此之外不安装任何软件、不修改系统；硬盘测试的临时文件测完即删。",
+      "CPU / 内存跑分与硬盘读写需要 sysbench、fio，物理机读硬盘健康与内存条还需要 smartmontools、dmidecode：缺少时开始前询问一次，15 秒不回答默认安装；不安装则跳过或用系统自带工具近似测量。",
+      "除此之外不安装任何软件、不修改系统；硬盘测试的临时文件与 Geekbench 程序测完即删。",
     ],
     privacyTitle: "会发送哪些数据",
     privacy: [
-      "检测在你的机器上完成，结果提交到 sh.cd 生成报告：硬件型号与跑分、解锁与邮箱握手结果、延迟、回程逐跳 IP、测速结果。",
+      "检测在你的机器上完成，结果提交到 sh.cd 生成报告：硬件型号与跑分、硬盘健康、解锁与邮箱握手结果、延迟、回程逐跳 IP、测速结果。",
+      "使用 -g 时 Geekbench 会把跑分结果公开上传到 Geekbench 官网，报告只附结果页链接。",
       "只查询发起请求的出口 IP，不能指定其他 IP。",
-      "不读取、不发送主机名、文件或登录信息。",
+      "不读取、不发送主机名、文件或登录信息，也不发送硬盘和内存条的序列号。",
     ],
   },
   en: {
@@ -195,15 +198,15 @@ const COPY: Record<Lang, Copy> = {
     stages: [
       {
         name: "Hardware & performance", flag: "-H", time: "1–2 min",
-        items: ["OS, kernel and virtualization", "CPU model, cache and extensions", "sysbench single / multi-thread", "Memory, overcommit and throughput", "fio 4K random and sequential I/O", "ATTO block-size table (-d)"],
+        items: ["OS, kernel, virtualization, temps", "CPU model, cache and extensions", "sysbench, Geekbench 6 (-g)", "Memory size and throughput", "fio 4K and sequential I/O, ATTO (-d)", "Bare metal: disk SMART and DIMMs"],
       },
       {
         name: "IP quality", flag: "-I", time: "30 s",
         items: ["Location, native or broadcast, IP type", "Purity, overall and risk scores", "VPN / proxy / Tor / abuse checks", "9 unlocks incl. Netflix and ChatGPT", "Port 25 and 12 mail providers", "DNS egress and platform fit"],
       },
       {
-        name: "Network quality", flag: "-N", time: "3 min",
-        items: ["NAT type and TCP settings", "BGP upstreams, peers and RPKI", "Latency to 31 Chinese provinces", "CN2 GIA / 9929 / CMIN2 detection", "Speed to China and 6 regions", "Latency to 12 international sites"],
+        name: "Network quality", flag: "-N", time: "3–5 min",
+        items: ["NAT type (NAT1–4) and TCP settings", "BGP upstreams, peers and RPKI", "Latency to 31 provinces, IPv4 + IPv6", "CN2 GIA / 9929 / CMIN2, IPv4 + IPv6", "Speed to China, provinces (-p), abroad", "Latency to 12 international sites"],
       },
     ],
     optionsTitle: "Options",
@@ -211,10 +214,12 @@ const COPY: Record<Lang, Copy> = {
     options: [
       ["no options", "Open the menu: 1 full check-up, 2 all checks"],
       ["-A", "Skip the menu and run the full check-up"],
-      ["-A -d", "All checks: full check-up + deep mode + hop-by-hop routes"],
+      ["-A -d", "All checks: full check-up plus deep mode, Geekbench, provinces and hop-by-hop routes"],
       ["-H  -I  -N", "Hardware / IP quality / network only"],
       ["-d", "Deep mode: ATTO table, latency per route hop"],
-      ["-y", "Install sysbench / fio without asking"],
+      ["-g", "Geekbench 6; results are uploaded publicly to Geekbench Browser"],
+      ["-p", "Speed tests to Chinese provinces; most block traffic from abroad"],
+      ["-y", "Install missing tools without asking"],
       ["-4  -6", "IP quality for IPv4 or IPv6 only"],
       ["-x PROXY", "Check a proxy exit, e.g. socks5h://127.0.0.1:1080"],
       ["-S LIST", "Skip: bench,media,mail,dns,latency,route,speed"],
@@ -231,14 +236,15 @@ const COPY: Record<Lang, Copy> = {
     requireTitle: "Requirements",
     require: [
       "bash 3.2+ and curl. Most complete on Linux; macOS covers IP quality and most network checks.",
-      "CPU, memory and disk benchmarks need sysbench and fio — you are asked once before starting, and they install by default after 15 s. Without them, built-in tools give rougher numbers.",
-      "Nothing else is installed or changed; disk test files are removed afterwards.",
+      "Benchmarks need sysbench and fio; on bare metal, disk health and memory modules also need smartmontools and dmidecode. You are asked once before starting, and they install by default after 15 s. Without them those parts are skipped or measured roughly with built-in tools.",
+      "Nothing else is installed or changed; disk test files and Geekbench are removed afterwards.",
     ],
     privacyTitle: "What is sent",
     privacy: [
-      "Checks run on your machine; results are sent to sh.cd to build the report: hardware model and scores, unlock and SMTP results, latency, per-hop route IPs and speed.",
+      "Checks run on your machine; results are sent to sh.cd to build the report: hardware model and scores, disk health, unlock and SMTP results, latency, per-hop route IPs and speed.",
+      "With -g, Geekbench uploads its results publicly to Geekbench Browser; the report only links to that page.",
       "Only the IP making the request is looked up — no other IP can be queried.",
-      "No hostname, files or credentials are read or sent.",
+      "No hostname, files or credentials are read or sent, and no disk or memory serial numbers.",
     ],
   },
 }

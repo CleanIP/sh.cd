@@ -14,7 +14,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -31,6 +31,9 @@ OPT_NOCOLOR=0
 DEEP=0
 AUTO_YES=0
 FULL=0
+GEEKBENCH=0
+CN_SPEED=0
+VIRT=""
 STAGES=""
 SKIP=","
 
@@ -48,9 +51,11 @@ Run without options in a terminal to open the menu.
   -I            IP quality
   -N            Network quality
   -A            Full check-up: hardware → IP → network (menu option 1)
-  -A -d         All checks: full check-up + deep mode + hop-by-hop routes (menu option 2)
+  -A -d         All checks: full check-up + deep mode + Geekbench + provincial speed + hop routes (menu 2)
   -d            Deep mode: ATTO disk table, latency per route hop
-  -y            Install sysbench / fio without asking when missing
+  -g            Geekbench 6 (downloads about 220 MB; results are uploaded publicly to Geekbench Browser)
+  -p            Speed tests to Chinese provincial servers (most block traffic from abroad)
+  -y            Install missing tools (sysbench, fio, …) without asking
 
   -4 / -6       IPv4 or IPv6 only (IP quality)
   -x PROXY      Check a proxy exit, e.g. socks5h://user:pass@host:1080
@@ -74,9 +79,11 @@ sh.cd v$VERSION — CleanIP 服务器全面体检: 硬件与性能 · IP 质量 
   -I            IP 质量
   -N            网络质量
   -A            一键全检: 硬件 → IP → 网络 (同菜单第 1 项)
-  -A -d         全部检测: 一键全检 + 深度模式 + 回程路由详情 (同菜单第 2 项)
+  -A -d         全部检测: 一键全检 + 深度模式 + Geekbench + 分省测速 + 回程详情 (同菜单第 2 项)
   -d            深度模式: 硬盘 ATTO 块大小表、回程每一跳的延迟
-  -y            缺少 sysbench / fio 时直接安装, 不询问
+  -g            Geekbench 6 跑分 (下载约 220 MB, 结果会公开上传到 Geekbench 官网)
+  -p            国内分省测速 (多数节点拦截境外来源, 国内服务器上测得全)
+  -y            缺少检测工具 (sysbench / fio 等) 时直接安装, 不询问
 
   -4 / -6       只检测 IPv4 或 IPv6 (IP 质量)
   -x PROXY      通过代理检测代理的出口, 例: socks5h://user:pass@host:1080
@@ -98,13 +105,15 @@ for a in "$@"; do case "$a" in -E | -len* | -lEN*) LANG_OPT=en ;; esac; done
 add_stage() { case " $STAGES " in *" $1 "*) ;; *) STAGES="$STAGES $1" ;; esac; }
 
 # -a / -s 是 v0.2 的参数 (全国延迟 / 测速), 现在网络质量默认就包含, 保留兼容
-while getopts ":HINAdy46x:i:asS:jnl:Ehv" opt; do
+while getopts ":HINAdgpy46x:i:asS:jnl:Ehv" opt; do
 	case "$opt" in
 	H) add_stage hw ;;
 	I) add_stage ip ;;
 	N) add_stage net ;;
 	A) add_stage hw; add_stage ip; add_stage net; FULL=1 ;;
 	d) DEEP=1 ;;
+	g) GEEKBENCH=1; add_stage hw ;;
+	p) CN_SPEED=1; add_stage net ;;
 	y) AUTO_YES=1 ;;
 	4) ONLY_FAMILY=4 ;;
 	6) ONLY_FAMILY=6 ;;
@@ -125,8 +134,12 @@ done
 
 skipped() { case "$SKIP" in *",$1,"*) return 0 ;; esac; return 1; }
 
-# -A -d = 全部检测: 一键全检 + 深度模式 + 回程路由详情 (同菜单第 2 项)
-[ "$FULL" = 1 ] && [ "$DEEP" = 1 ] && add_stage route
+# -A -d = 全部检测: 一键全检 + 深度模式 + Geekbench + 分省测速 + 回程路由详情 (同菜单第 2 项)
+if [ "$FULL" = 1 ] && [ "$DEEP" = 1 ]; then
+	add_stage route
+	GEEKBENCH=1
+	CN_SPEED=1
+fi
 
 if ! command -v curl >/dev/null 2>&1; then
 	printf '%s\n' "$(t "需要 curl, 请先安装: apt install -y curl 或 yum install -y curl" "curl is required: apt install -y curl or yum install -y curl")" >&2
@@ -155,6 +168,7 @@ BENCH_FILE=""
 cleanup() {
 	jobs -p 2>/dev/null | xargs kill -9 2>/dev/null
 	[ -n "$BENCH_FILE" ] && rm -f "$BENCH_FILE" 2>/dev/null
+	[ -n "$GB_DIR" ] && rm -rf "$GB_DIR" 2>/dev/null
 	rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -176,6 +190,7 @@ progress_done() {
 # 服务端看到的来源 IP 才是正在检测的那个出口。
 
 NET=()
+NET_V6=no
 set_net() {
 	NET=()
 	[ -n "$1" ] && NET+=("-$1")
@@ -215,6 +230,7 @@ positive() { awk -v v="$1" 'BEGIN { exit !(v + 0 > 0) }'; }
 #   hw_disk=块设备数|总容量|测试分区容量|已用|可用|设备名|ssd/hdd
 #   bn_cpu=工具|单线程|多线程|线程数   bn_mem=工具|读|写   bn_r4q1 / bn_r4q32 / bn_s1q1 / bn_s1q8=读KiB/s|读IOPS|写KiB/s|写IOPS
 #   bn_atto_<块大小>=同上 (-d)   bn_dd=顺序写字节/秒|顺序读字节/秒|4K同步写IOPS (没有 fio 时)
+#   hw_temp=cpu:52.0,nvme:41.0,…   sm_* / mm_* 物理机硬盘 SMART 与内存条 (见 hw_collect_physical)   bn_gb Geekbench (-g)
 
 # 虚拟化 / 容器类型, 输出 systemd-detect-virt 风格的代码, 报告里再翻译
 detect_virt() {
@@ -286,7 +302,8 @@ hw_collect() {
 		os=$(uname -s)
 	fi
 	put "$d" hw_os "$(clean "$os")|$(clean "$kernel")|$(clean "$arch")"
-	put "$d" hw_virt "$(clean "$(detect_virt)")"
+	[ -n "$VIRT" ] || VIRT=$(detect_virt)
+	put "$d" hw_virt "$(clean "$VIRT")"
 
 	if [ -r /proc/uptime ]; then
 		up=$(cut -d. -f1 /proc/uptime)
@@ -322,6 +339,8 @@ hw_collect() {
 	hw_collect_cpu "$d"
 	hw_collect_mem "$d"
 	hw_collect_disk "$d"
+	hw_collect_temp "$d"
+	hw_collect_physical "$d"
 }
 
 hw_collect_cpu() {
@@ -388,13 +407,163 @@ hw_collect_disk() {
 	put "$d" hw_disk "$n|$total|$(printf '%s' "$df" | awk '{ printf "%.0f|%.0f|%.0f", $2 * 1024, $3 * 1024, $4 * 1024 }')|$(clean "$(basename "$src")")|$type"
 }
 
+# ── 温度: 读内核 hwmon / thermal, 不用装 lm-sensors ──────────────────────────
+# 每类取最高值: cpu (coretemp 的 Package / k10temp 的 Tctl·Tdie / ARM 的 cpu_thermal) · nvme (Composite) ·
+# disk (drivetemp) · gpu · board (主板 / ACPI)。虚拟机通常读不到, 读不到就不报。
+hw_collect_temp() {
+	local d="$1" out
+	[ "$IS_LINUX" = 1 ] || return 0
+	out=$(temp_lines | awk '$2 > 0 && $2 < 150000 { if (!($1 in m) || $2 > m[$1]) m[$1] = $2 } END { for (k in m) printf "%s:%.1f\n", k, m[k] / 1000 }' | sort | paste -sd, -)
+	[ -n "$out" ] && put "$d" hw_temp "$out"
+	return 0
+}
+
+# 每行 "类别 毫摄氏度"。单独成函数: bash 3.2 解析 $( ) 里嵌套的 case 会报语法错误
+temp_lines() {
+	local h name f v label z type
+	for h in /sys/class/hwmon/hwmon*; do
+		[ -d "$h" ] || continue
+		name=$(cat "$h/name" 2>/dev/null)
+		for f in "$h"/temp*_input; do
+			[ -r "$f" ] || continue
+			v=$(cat "$f" 2>/dev/null)
+			label=$(cat "${f%_input}_label" 2>/dev/null)
+			case "$name" in
+			coretemp) case "$label" in Package*) echo "cpu $v" ;; esac ;;
+			k10temp | zenpower) case "$label" in Tctl | Tdie | "") echo "cpu $v" ;; esac ;;
+			cpu_thermal | cpu-thermal | soc_thermal) echo "cpu $v" ;;
+			nvme) case "$label" in Composite | "") echo "nvme $v" ;; esac ;;
+			drivetemp) echo "disk $v" ;;
+			amdgpu | nouveau | radeon) echo "gpu $v" ;;
+			acpitz | pch_*) echo "board $v" ;;
+			esac
+		done
+	done
+	for z in /sys/class/thermal/thermal_zone*; do
+		[ -r "$z/temp" ] || continue
+		type=$(cat "$z/type" 2>/dev/null)
+		case "$type" in x86_pkg_temp | *cpu* | soc*) echo "cpu $(cat "$z/temp" 2>/dev/null)" ;; esac
+	done
+}
+
+# ── 物理机: 硬盘 SMART 与内存条 (虚拟机上这些都是虚拟化平台模拟的, 不采) ──────────────
+# 需要 root (或免密 sudo) 与 smartmontools / dmidecode, 缺工具时随跑分工具一起询问安装。
+#   sm_<n>=接口|型号|容量字节|nvme/ssd/hdd|pass/fail|通电小时|温度|已用寿命%|累计写入字节|重映射扇区|待映射扇区|无法修复扇区|介质错误
+#   mm_array=最大容量字节|插槽数|纠错类型     mm_<n>=条数|单条字节|类型|额定速率|实际速率|厂商|型号|Rank|外形
+hw_collect_physical() {
+	local d="$1" sudo="" n=0 dev typ line
+	[ "$IS_LINUX" = 1 ] && [ "$VIRT" = none ] || return 0
+	if [ "$(id -u)" != 0 ]; then
+		if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then sudo="sudo -n"; else put "$d" hw_noroot 1; return 0; fi
+	fi
+	if command -v smartctl >/dev/null 2>&1; then
+		$sudo smartctl --scan 2>/dev/null | head -n 8 | while read -r dev _ typ _; do
+			line=$($sudo smartctl -i -H -A -d "$typ" "$dev" 2>/dev/null | smart_parse)
+			[ -n "$line" ] || continue
+			n=$((n + 1))
+			put "$d" "sm_$n" "$line"
+		done
+	fi
+	if command -v dmidecode >/dev/null 2>&1; then
+		$sudo dmidecode -t 16,17 2>/dev/null | dimm_parse "$d"
+	fi
+}
+
+# smartctl -i -H -A 的文本输出 → 一行 sm 字段; 虚拟盘 / 读不到 SMART 的输出空
+smart_parse() {
+	awk '
+	function num(s) { gsub(/[^0-9]/, "", s); return s }
+	function after(s) { sub(/^[^:]*:[ \t]*/, "", s); return s }
+	/^(Device Model|Model Number|Product):/ { model = after($0) }
+	/^Vendor:/ { vendor = after($0) }
+	/^User Capacity:/ { cap = num(substr($0, 1, index($0, "bytes"))) }
+	/^(Total NVM Capacity|Namespace 1 Size\/Capacity):/ && !cap { s = after($0); sub(/\[.*/, "", s); cap = num(s) }
+	/^Rotation Rate:/ { rot = after($0) }
+	/^NVMe Version:|NVMe Log/ { proto = "nvme" }
+	/^ATA Version is:|^SATA Version is:/ { proto = "ata" }
+	/^Transport protocol:|^Logical Unit id:/ { if (!proto) proto = "scsi" }
+	/SMART overall-health self-assessment test result:/ { health = ($NF == "PASSED") ? "pass" : "fail" }
+	/^SMART Health Status:/ { health = ($NF == "OK") ? "pass" : "fail" }
+	/^Temperature:/ { temp = num($2) }
+	/^Current Drive Temperature:/ { temp = num($4) }
+	/^Percentage Used:/ { used = num($3) }
+	/^Data Units Written:/ { s = $4; w = num(s) * 512000 }
+	/^Power On Hours:/ { hours = num($4) }
+	/^Accumulated power on time, hours:minutes/ { s = $NF; sub(/:.*/, "", s); hours = num(s) }
+	/^Media and Data Integrity Errors:/ { media = num($NF) }
+	/^Elements in grown defect list:/ { realloc = num($NF) }
+	# ATA 属性表: ID 名称 标志 当前值 最差 阈值 类型 更新 失败时间 原始值
+	$1 ~ /^[0-9]+$/ && NF >= 10 {
+		id = $1; val = $4 + 0; raw = $10
+		if (id == 9) hours = num(raw)
+		else if (id == 194 || (id == 190 && !temp)) temp = num(raw)
+		else if (id == 5) realloc = num(raw)
+		else if (id == 197) pending = num(raw)
+		else if (id == 198) uncorrect = num(raw)
+		else if (id == 241) w = num(raw) * 512
+		else if (id == 177 || id == 231 || id == 233 || id == 202) { if (used == "") used = 100 - val }
+	}
+	END {
+		if (!proto) proto = (rot == "" ? "" : "ata")
+		if (model == "" || model ~ /QEMU|VBOX|VMware|Virtual/) exit
+		if (vendor != "" && index(model, vendor) != 1) model = vendor " " model
+		gsub(/\|/, " ", model)
+		kind = proto == "nvme" ? "nvme" : (rot ~ /Solid State/ ? "ssd" : (rot ~ /rpm/ ? "hdd" : ""))
+		# 大数字用 %.0f 输出, 否则 awk 会写成 6.3e+12
+		printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", proto, model, cap, kind, health, hours, temp, used, (w == "" ? "" : sprintf("%.0f", w)), realloc, pending, uncorrect, media
+	}'
+}
+
+# dmidecode -t 16,17 → mm_array 与按规格合并的 mm_<n>
+dimm_parse() {
+	local d="$1"
+	awk '
+	function bytes(s,   n) { n = s + 0; if (s ~ /TB/) return n * 1099511627776; if (s ~ /GB/) return n * 1073741824; if (s ~ /MB/) return n * 1048576; if (s ~ /kB|KB/) return n * 1024; return 0 }
+	function flush() {
+		if (dev && size > 0) {
+			key = sprintf("%.0f|%s|%s|%s|%s|%s|%s|%s", size, type, speed, conf, manu, part, rank, form)
+			if (!(key in cnt)) order[++n] = key
+			cnt[key]++
+		}
+		dev = 0; size = 0; type = speed = conf = manu = part = rank = form = ""
+	}
+	/^Handle / { flush() }
+	/^Physical Memory Array/ { arr = 1; dev = 0 }
+	/^Memory Device/ { dev = 1; arr = 0 }
+	{ line = $0; sub(/^[ \t]+/, "", line); k = line; sub(/:.*/, "", k); v = line; sub(/^[^:]*:[ \t]*/, "", v); gsub(/\|/, " ", v) }
+	arr && k == "Maximum Capacity" { maxcap = bytes(v) }
+	arr && k == "Number Of Devices" { slots += v + 0 }
+	arr && k == "Error Correction Type" { ecc = v }
+	dev && k == "Size" { size = (v ~ /No Module|Not Installed|Unknown/) ? 0 : bytes(v) }
+	dev && k == "Type" { type = v }
+	dev && k == "Speed" { speed = (v ~ /MT\/s|MHz/) ? v + 0 : "" }
+	dev && k == "Configured Memory Speed" { conf = (v ~ /MT\/s|MHz/) ? v + 0 : "" }
+	dev && k == "Configured Clock Speed" && conf == "" { conf = (v ~ /MT\/s|MHz/) ? v + 0 : "" }
+	dev && k == "Manufacturer" { manu = (v ~ /Not Specified|Unknown|^0000|NO DIMM/) ? "" : v }
+	dev && k == "Part Number" { part = (v ~ /Not Specified|Unknown|NO DIMM/) ? "" : v; gsub(/ +$/, "", part) }
+	dev && k == "Rank" { rank = (v ~ /Unknown/) ? "" : v + 0 }
+	dev && k == "Form Factor" { form = v }
+	END {
+		flush()
+		if (maxcap || slots) printf "mm_array=%.0f|%s|%s\n", maxcap, slots, ecc
+		for (i = 1; i <= n && i <= 6; i++) printf "mm_%d=%d|%s\n", i, cnt[order[i]], order[i]
+	}' >>"$d/fields"
+}
+
 # ── 跑分工具: 缺 sysbench / fio 时询问安装 ────────────────────────────────
 
 ensure_bench_tools() {
-	local missing="" sudo="" ans pm rc
+	local missing="" pkgs="" sudo="" ans pm rc
 	[ "$IS_LINUX" = 1 ] || return 0
-	command -v sysbench >/dev/null 2>&1 || missing="$missing sysbench"
-	command -v fio >/dev/null 2>&1 || missing="$missing fio"
+	if ! skipped bench; then
+		command -v sysbench >/dev/null 2>&1 || { missing="$missing sysbench"; pkgs="$pkgs sysbench"; }
+		command -v fio >/dev/null 2>&1 || { missing="$missing fio"; pkgs="$pkgs fio"; }
+	fi
+	# 物理机才读硬盘 SMART 与内存条, 虚拟机上装了也读不到
+	if [ "$VIRT" = none ]; then
+		command -v smartctl >/dev/null 2>&1 || { missing="$missing smartctl"; pkgs="$pkgs smartmontools"; }
+		command -v dmidecode >/dev/null 2>&1 || { missing="$missing dmidecode"; pkgs="$pkgs dmidecode"; }
+	fi
 	[ -n "$missing" ] || return 0
 	if [ "$(id -u)" != 0 ]; then
 		if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then sudo="sudo -n"; else return 0; fi
@@ -406,7 +575,7 @@ ensure_bench_tools() {
 		[ "$INTERACTIVE" = 1 ] || return 0
 		progress_done
 		printf '\n  %s%s%s %s\n' "$C_Y" "!" "$C_0" "$(t "缺少测试工具:$missing" "Missing benchmark tools:$missing")"
-		printf '    %s\n' "$(t "安装后才能测 CPU 跑分与硬盘读写; 不安装则用系统自带工具近似测量" "Needed for CPU scores and disk I/O; without them, rougher built-in measurements are used")"
+		printf '    %s\n' "$(t "用于 CPU 跑分、硬盘读写与物理机的硬盘健康、内存条信息; 不安装则跳过或用系统自带工具近似测量" "Used for CPU scores, disk I/O, and disk health / memory modules on bare metal; without them those parts are skipped or approximated")"
 		printf '    %s [Y/n] ' "$(t "现在用 $pm 安装? 15 秒不回答默认安装" "Install with $pm now? Defaults to yes in 15 s")"
 		# 超时按默认 (安装) 继续, 一键全检无人值守时不卡在这里; 读不到终端才当作不安装
 		read -r -t 15 ans 2>/dev/null </dev/tty
@@ -414,19 +583,19 @@ ensure_bench_tools() {
 		if [ "$rc" -gt 128 ]; then ans=y; printf '\n'; elif [ "$rc" != 0 ]; then ans=n; fi
 		case "$ans" in n | N | no | No) return 0 ;; esac
 	fi
-	progress "$(t "安装$missing …" "Installing$missing …")"
+	progress "$(t "安装$pkgs …" "Installing$pkgs …")"
 	case "$pm" in
 	apt-get)
-		$sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing >/dev/null 2>&1 ||
-			{ $sudo apt-get update -qq >/dev/null 2>&1 && $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing >/dev/null 2>&1; }
+		$sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $pkgs >/dev/null 2>&1 ||
+			{ $sudo apt-get update -qq >/dev/null 2>&1 && $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $pkgs >/dev/null 2>&1; }
 		;;
 	dnf | yum)
-		case "$missing" in *sysbench*) $sudo "$pm" install -y -q epel-release >/dev/null 2>&1 ;; esac
-		$sudo "$pm" install -y -q $missing >/dev/null 2>&1
+		case "$pkgs" in *sysbench*) $sudo "$pm" install -y -q epel-release >/dev/null 2>&1 ;; esac
+		$sudo "$pm" install -y -q $pkgs >/dev/null 2>&1
 		;;
-	apk) $sudo apk add -q $missing >/dev/null 2>&1 ;;
-	pacman) $sudo pacman -Sy --noconfirm $missing >/dev/null 2>&1 ;;
-	zypper) $sudo zypper -n -q install $missing >/dev/null 2>&1 ;;
+	apk) $sudo apk add -q $pkgs >/dev/null 2>&1 ;;
+	pacman) $sudo pacman -Sy --noconfirm $pkgs >/dev/null 2>&1 ;;
+	zypper) $sudo zypper -n -q install $pkgs >/dev/null 2>&1 ;;
 	esac
 	progress_done
 }
@@ -509,15 +678,59 @@ hw_bench() {
 	progress_done
 }
 
+# ── Geekbench 6 (-g / 全部检测) ────────────────────────────────────────────────
+# 从 Geekbench 官方 CDN 下载命令行版 (约 220 MB, 只有 IPv4), 跑完上传到 Geekbench Browser (免费版必须上传, 结果公开), 跑完即删。
+# 命令行免费版不在本地输出分数; 结果页有人机验证 (2026-09-17 洛杉矶与本地 curl 都是 403), 不去绕过, 只给出结果页链接。
+# 带 key 的「认领结果」链接不提交。
+# 官方 CDN 到部分机房很慢 (2026-09-17 洛杉矶机 50 KB/s, 香港与本地 10 MB/s 以上), 连续 20 秒低于 100 KB/s 就放弃。
+#   bn_gb=版本|ok|||结果页 (单核 / 多核留空)   或 版本|<unsupported|lowmem|nospace|download|fail>
+GB_VERSION=6.7.1
+GB_DIR=""
+
+hw_geekbench() {
+	local d="$1" url mem_kb free_kb out result
+	[ "$IS_LINUX" = 1 ] && [ -n "$BENCH_DIR" ] || return 0
+	case "$(uname -m)" in
+	x86_64 | amd64) url="https://cdn.geekbench.com/Geekbench-$GB_VERSION-Linux.tar.gz" ;;
+	aarch64 | arm64) url="https://cdn.geekbench.com/Geekbench-$GB_VERSION-LinuxARMPreview.tar.gz" ;;
+	*) put "$d" bn_gb "$GB_VERSION|unsupported"; return 0 ;;
+	esac
+	# 内存 1 GB 以下 Geekbench 6 常跑不完 (内存 + Swap 合计不足 1.5 GB 时跳过)
+	mem_kb=$(awk '/^(MemTotal|SwapTotal):/ { s += $2 } END { print s + 0 }' /proc/meminfo)
+	[ "$mem_kb" -ge 1500000 ] || { put "$d" bn_gb "$GB_VERSION|lowmem"; return 0; }
+	free_kb=$(df -Pk "$BENCH_DIR" 2>/dev/null | awk 'NR == 2 { print $4 }')
+	[ "${free_kb:-0}" -ge 1048576 ] || { put "$d" bn_gb "$GB_VERSION|nospace"; return 0; }
+
+	GB_DIR="$BENCH_DIR/.shcd-geekbench"
+	rm -rf "$GB_DIR"
+	mkdir -p "$GB_DIR"
+	progress "$(t "[硬件] 下载 Geekbench $GB_VERSION (约 220 MB)…" "[Hardware] Downloading Geekbench $GB_VERSION (about 220 MB)…")"
+	if ! curl -4 -sL --speed-limit 102400 --speed-time 20 -m 900 "$url" | tar xz --strip-components=1 -C "$GB_DIR" 2>/dev/null || [ ! -x "$GB_DIR/geekbench6" ]; then
+		rm -rf "$GB_DIR"
+		put "$d" bn_gb "$GB_VERSION|download"
+		return 0
+	fi
+	progress "$(t "[硬件] Geekbench $GB_VERSION 跑分, 约 3–10 分钟…" "[Hardware] Geekbench $GB_VERSION, 3–10 minutes…")"
+	out=$(cd "$GB_DIR" && with_timeout 1800 ./geekbench6 --upload 2>/dev/null)
+	rm -rf "$GB_DIR"
+	result=$(printf '%s\n' "$out" | grep -oE 'https://browser\.geekbench\.com/v6/cpu/[0-9]+' | head -n1)
+	[ -n "$result" ] || { put "$d" bn_gb "$GB_VERSION|fail"; return 0; }
+	# 免费版命令行不输出分数, 结果页有人机验证, 只给出结果页链接 (单核 / 多核两栏留空)
+	put "$d" bn_gb "$GB_VERSION|ok|||$result"
+}
+
 stage_hw() {
 	local d="$TMP/hw"
 	mkdir -p "$d"
 	: >"$d/fields"
+	# 先判断虚拟化: 物理机才需要装 SMART / 内存条工具, 工具要在采集前装好
+	VIRT=$(detect_virt)
+	ensure_bench_tools
 	progress "$(t "[硬件] 读取系统与硬件信息…" "[Hardware] Reading system information…")"
 	hw_collect "$d"
 	if ! skipped bench; then
-		ensure_bench_tools
 		hw_bench "$d"
+		[ "$GEEKBENCH" = 1 ] && hw_geekbench "$d"
 	fi
 	progress_done
 }
@@ -802,11 +1015,14 @@ stage_ip_exit() {
 # 三、网络质量
 # ════════════════════════════════════════════════════════════════════════
 # 字段:
-#   nt_nat=open|公网IP 或 nat|公网IP 或 fail   nt_tcp=拥塞控制|队列|rmem|wmem   nt_v6=yes|no
+#   nt_nat=<open|firewall|full_cone|restricted|port_restricted|symmetric|nat|blocked>|公网IP 或 fail
+#   nt_tcp=拥塞控制|队列|rmem|wmem   nt_v6=yes|no
 #   lat_<省>_<ct|cu|cm>=5 次采样毫秒 (0 = 丢包), 逗号分隔
 #   rt_<bj|sh|gd>_<ct|cu|cm>=TTL:IP,…  (深度模式 TTL:IP:毫秒)   一跳都没回应为 none
+#   lat6_* / rt6_*=同上的 IPv6 版本, rt6 用斜杠分隔: TTL/IP[/毫秒] (有 IPv6 时才测)
 #   sp_<n>=<ct|cu|cm|intl|near>|<地点代码或城市名>|下载Mbps|上传Mbps  (fail = 连不上, stall = 节点不收发)
 #   il_<地点代码>=毫秒 或 fail
+#   spc_<省>_<ct|cu|cm>=城市|下载Mbps|上传Mbps 或 fail   分省测速 (-p)
 
 # ── 本地网络策略: NAT 类型 (纯 bash 发 STUN 请求)、TCP 拥塞控制与缓冲区 ──
 # bash 的 UDP 连接每次换源端口, 无法用同一端口问两台 STUN 服务器, 所以只区分「公网直连」与「在 NAT 后」。
@@ -835,8 +1051,12 @@ stun_mapped() {
 }
 
 net_local() {
-	local d="$1" mapped="" s local_ips cc qd rm wm v6
-	if [ "$IS_LINUX" = 1 ]; then
+	local d="$1" mapped="" s local_ips cc qd rm wm v6 nat
+	# NAT 类型: 有 python3 就按 RFC 3489 细分 (全锥 / 限制锥 / 端口限制锥 / 对称), 没有就用纯 bash 只分公网直连 / NAT 后
+	nat=$(nat_type)
+	if [ -n "$nat" ]; then
+		put "$d" nt_nat "$nat"
+	elif [ "$IS_LINUX" = 1 ]; then
 		for s in stun.cloudflare.com:3478 stun.l.google.com:19302; do
 			mapped=$(stun_mapped "${s%:*}" "${s#*:}")
 			[ -n "$mapped" ] && break
@@ -846,6 +1066,8 @@ net_local() {
 			local_ips=" $(ip -4 -o addr show 2>/dev/null | awk '{ sub(/\/.*/, "", $4); printf "%s ", $4 }')"
 			case "$local_ips" in *" $mapped "*) put "$d" nt_nat "open|$mapped" ;; *) put "$d" nt_nat "nat|$mapped" ;; esac
 		fi
+	fi
+	if [ "$IS_LINUX" = 1 ]; then
 		cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
 		qd=$(sysctl -n net.core.default_qdisc 2>/dev/null)
 		rm=$(sysctl -n net.ipv4.tcp_rmem 2>/dev/null | tr -s '\t ' ' ')
@@ -854,8 +1076,113 @@ net_local() {
 	fi
 	v6=no
 	[ -n "$(curl -6 -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ] && v6=yes
+	NET_V6=$v6
 	put "$d" nt_v6 "$v6"
 }
+
+# NAT 类型 (RFC 3489 经典分类), 输出 类型|公网映射 IP:
+#   open 公网直连 · firewall 公网 IP 但入站 UDP 被过滤 · full_cone 全锥形 (NAT1) · restricted 限制锥形 (NAT2)
+#   port_restricted 端口限制锥形 (NAT3) · symmetric 对称形 (NAT4) · nat 在 NAT 后但类型没测全 · blocked 出站 UDP 不通
+# 要用同一个本地端口先后问 STUN 服务器, 并请它换 IP / 换端口回包, bash 的 /dev/udp 做不到, 所以用 python3。
+# 支持换地址回包 (CHANGE-REQUEST) 的公共服务器不多, 2026-09-17 洛杉矶实测前 4 个可用, 按顺序试;
+# 最后两个只回映射地址, 前面都不通时至少分出公网直连 / NAT 后。
+NAT_STUN="stun.miwifi.com:3478 stun.fitauto.ru:3478 stun.voipgate.com:3478 stun.ekiga.net:3478 stun.cloudflare.com:3478 stun.l.google.com:19302"
+
+nat_type() {
+	command -v python3 >/dev/null 2>&1 || return 0
+	# shellcheck disable=SC2086
+	with_timeout 45 python3 -c "$NAT_PY" $NAT_STUN 2>/dev/null
+}
+
+NAT_PY='
+import os, socket, struct, sys
+MAGIC = 0x2112A442
+
+def query(sock, addr, change=0, tries=2, timeout=1.5):
+    tid = os.urandom(12)
+    attrs = struct.pack("!HHI", 0x0003, 4, change) if change else b""
+    msg = struct.pack("!HHI", 0x0001, len(attrs), MAGIC) + tid + attrs
+    for _ in range(tries):
+        try:
+            sock.sendto(msg, addr)
+            sock.settimeout(timeout)
+            while True:
+                data, _src = sock.recvfrom(2048)
+                if len(data) >= 20 and data[8:20] == tid:
+                    return parse(data)
+        except socket.timeout:
+            continue
+        except OSError:
+            return None
+    return None
+
+def parse(data):
+    out, i = {}, 20
+    while i + 4 <= len(data):
+        t, l = struct.unpack("!HH", data[i:i + 4])
+        v = data[i + 4:i + 4 + l]
+        if t in (0x0001, 0x0020, 0x0005, 0x802C) and l >= 8 and v[1] == 1:
+            port = struct.unpack("!H", v[2:4])[0]
+            ip = bytes(v[4:8])
+            if t == 0x0020:
+                port ^= MAGIC >> 16
+                ip = bytes(a ^ b for a, b in zip(ip, struct.pack("!I", MAGIC)))
+            addr = (socket.inet_ntoa(ip), port)
+            if t == 0x0020 or (t == 0x0001 and "mapped" not in out):
+                out["mapped"] = addr
+            elif t in (0x0005, 0x802C):
+                out["other"] = addr
+        i += 4 + l + (-l % 4)
+    return out
+
+servers = []
+for item in sys.argv[1:]:
+    host, port = item.rsplit(":", 1)
+    try:
+        servers.append((socket.gethostbyname(host), int(port)))
+    except OSError:
+        pass
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(("0.0.0.0", 0))
+full = plain = None
+for addr in servers:
+    r = query(sock, addr)
+    if not r or "mapped" not in r:
+        continue
+    if "other" in r:
+        full = (addr, r)
+        break
+    plain = plain or (addr, r)
+
+best = full or plain
+if not best:
+    print("blocked|")
+    sys.exit()
+addr, r = best
+mapped = r["mapped"]
+probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+probe.connect(addr)
+local_ip = probe.getsockname()[0]
+probe.close()
+public = mapped[0] == local_ip
+if not full:
+    print(("open" if public else "nat") + "|" + mapped[0])
+elif public:
+    print(("open" if query(sock, addr, change=0x06) else "firewall") + "|" + mapped[0])
+elif query(sock, addr, change=0x06):
+    print("full_cone|" + mapped[0])
+else:
+    r2 = query(sock, r["other"])
+    if not r2 or "mapped" not in r2:
+        print("nat|" + mapped[0])
+    elif r2["mapped"] != mapped:
+        print("symmetric|" + mapped[0])
+    elif query(sock, addr, change=0x02):
+        print("restricted|" + mapped[0])
+    else:
+        print("port_restricted|" + mapped[0])
+'
 
 # ── 三网延迟: 全国 31 省 × 电信 / 联通 / 移动, TCP 握手, 每节点 5 次 ──────────────
 # 节点与 CleanIP 后台三网监测相同: <省>-<ct|cu|cm>-dualstack.ip.zstaticcdn.com。
@@ -875,12 +1202,14 @@ lat_node() {
 	echo "${out#,}"
 }
 
+# $2 = 6 时走 IPv6 (zstatic 的 dualstack 节点双栈都有), 字段前缀 lat6_
 run_latency() {
-	local d="$1" p c n=0
-	mkdir -p "$d/lat"
+	local d="$1" fam="${2:-4}" p c n=0 key=lat
+	[ "$fam" = 6 ] && key=lat6
+	mkdir -p "$d/$key"
 	for p in $PROVINCES; do
 		for c in ct cu cm; do
-			(put "$d/lat" "lat_${p}_$c" "$(lat_node "$p-$c-dualstack.ip.zstaticcdn.com")") &
+			(put "$d/$key" "${key}_${p}_$c" "$(lat_node "$p-$c-dualstack.ip.zstaticcdn.com")") &
 			n=$((n + 1))
 			# 93 个节点分批并发, 同时发起太多连接会互相挤占, 测出来偏高
 			[ $((n % 18)) = 0 ] && wait
@@ -893,12 +1222,22 @@ run_latency() {
 # 不依赖 traceroute: TTL 1–30 并行各发 3 个包, 收集「TTL 超时」回包的来源 IP。
 # TTL 超时的回包不带耗时, 深度模式下再对每个跳点单独 ping 取延迟 —— 不能拿并发 ping 的进程耗时凑数,
 # 180 个 ping 同时起进程时第一跳内网网关都会算出 100ms 以上 (2026-09-16 洛杉矶实测)。
-# Linux 的 ping 不需要 root (2026-09-15 洛杉矶机 root 与 nobody 实测结果一致)。只测 IPv4。
+# Linux 的 ping 不需要 root (2026-09-15 洛杉矶机 root 与 nobody 实测结果一致)。
+# IPv6 (只在 Linux 上测): ping -6 -t 设的是跳数限制, 目标沿用 oneclickvirt/backtrace 的三网 IPv6 地址;
+# IPv6 地址本身带冒号, 逐跳记录与字段改用斜杠分隔: rt6_<城市>_<运营商>=TTL/IP[/毫秒],…
 
 ROUTE_TARGETS="bj_ct:219.141.140.10 bj_cu:202.106.195.68 bj_cm:221.179.155.161 sh_ct:202.96.209.133 sh_cu:210.22.97.1 sh_cm:211.136.112.200 gd_ct:58.60.188.222 gd_cu:210.21.196.6 gd_cm:120.196.165.24"
+ROUTE_TARGETS6="bj_ct=2400:89c0:1053:3::69 bj_cu=2400:89c0:1013:3::54 bj_cm=2409:8c00:8421:1303::55 sh_ct=240e:e1:aa00:4000::24 sh_cu=2408:80f1:21:5003::a sh_cm=2409:8c1e:75b0:3003::26 gd_ct=240e:97c:2f:3000::44 gd_cu=2408:8756:f50:1001::c gd_cm=2409:8c54:871:1001::12"
 
+# $3 = 6 时走 IPv6, 输出 TTL/IP; 否则输出 TTL:IP
 hop_probe() {
-	local ttl="$1" target="$2" ip
+	local ttl="$1" target="$2" fam="${3:-4}" ip
+	if [ "$fam" = 6 ]; then
+		# 到达目标时回复行是 "bytes from 地址: icmp_seq", 地址后面紧跟冒号要去掉; 但 "…::" 结尾的地址本身合法, 只去多出的那一个
+		ip=$(ping -6 -n -c 1 -W 1 -t "$ttl" ${IFACE:+-I "$IFACE"} "$target" 2>/dev/null | grep -oE '[Ff]rom [0-9a-fA-F:]+' | head -n1 | cut -d' ' -f2 | sed -E 's/:::$/::/; s/([0-9a-fA-F]):$/\1/')
+		[ -n "$ip" ] && echo "$ttl/$ip"
+		return 0
+	fi
 	if [ "$(uname -s)" = Darwin ]; then
 		# macOS: -m 是 TTL, -W 单位毫秒; -t 在 macOS 上是总超时
 		ip=$(ping -n -c 1 -W 1000 -m "$ttl" "$target" 2>/dev/null | grep -oE '[Ff]rom ([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 | cut -d' ' -f2)
@@ -910,17 +1249,18 @@ hop_probe() {
 
 # 对一个 IP 直接 ping 3 次, 输出最小耗时毫秒 (取整)
 hop_rtt() {
-	local w=1
+	local w=1 v=""
 	[ "$(uname -s)" = Darwin ] && w=1000
-	ping -n -c 3 -i 0.2 -W "$w" ${IFACE:+-I "$IFACE"} "$1" 2>/dev/null | grep -oE 'time=[0-9.]+' | cut -d= -f2 | sort -n | head -n1 | awk '{ printf "%.0f", $1 }'
+	case "$1" in *:*) v=-6 ;; esac
+	ping $v -n -c 3 -i 0.2 -W "$w" ${IFACE:+-I "$IFACE"} "$1" 2>/dev/null | grep -oE 'time=[0-9.]+' | cut -d= -f2 | sort -n | head -n1 | awk '{ printf "%.0f", $1 }'
 }
 
 # 第一轮: TTL 1–30 并发各发 3 个包
 route_trace() {
-	local target="$1" out="$2" ttl k
+	local target="$1" out="$2" fam="${3:-4}" ttl k
 	for ttl in $(seq 1 30); do
 		for k in 1 2 3; do
-			(hop_probe "$ttl" "$target" >>"$out") &
+			(hop_probe "$ttl" "$target" "$fam" >>"$out") &
 		done
 	done
 	wait
@@ -930,58 +1270,64 @@ route_trace() {
 # 少了 CN2 段的跳会把 GIA 误判成混合 (2026-09-16 洛杉矶到上海电信实测时有时无)。
 # 到达目标 (或最后一个回应) 之前缺的跳, 按顺序间隔 0.3 秒各补 2 次。
 route_retry() {
-	local target="$1" out="$2" ttl k last
-	last=$(awk -F: -v t="$target" '$2 == t { print $1; exit }' "$out" 2>/dev/null)
-	[ -z "$last" ] && last=$(cut -d: -f1 "$out" 2>/dev/null | sort -n | tail -n1)
+	local target="$1" out="$2" fam="${3:-4}" sep=: ttl k last
+	[ "$fam" = 6 ] && sep=/
+	last=$(awk -F"$sep" -v t="$target" '$2 == t { print $1; exit }' "$out" 2>/dev/null)
+	[ -z "$last" ] && last=$(cut -d"$sep" -f1 "$out" 2>/dev/null | sort -n | tail -n1)
 	[ -n "$last" ] || return 0
 	for ttl in $(seq 2 "$last"); do
-		grep -q "^$ttl:" "$out" 2>/dev/null && continue
+		grep -q "^$ttl$sep" "$out" 2>/dev/null && continue
 		for k in 1 2; do
-			hop_probe "$ttl" "$target" >>"$out"
-			grep -q "^$ttl:" "$out" && break
+			hop_probe "$ttl" "$target" "$fam" >>"$out"
+			grep -q "^$ttl$sep" "$out" && break
 			sleep 0.3
 		done
 	done
 }
 
+# $2 = 6 时测 IPv6, 结果写进 $1/route6, 字段 rt6_*
 run_route() {
-	local d="$1" item key hops
+	local d="$1" fam="${2:-4}" item key target hops dir=route prefix=rt sep=: targets="$ROUTE_TARGETS"
 	command -v ping >/dev/null 2>&1 || return 0
-	mkdir -p "$d/route"
+	if [ "$fam" = 6 ]; then
+		[ "$IS_LINUX" = 1 ] || return 0
+		dir=route6 prefix=rt6 sep=/ targets=$(printf '%s' "$ROUTE_TARGETS6" | tr '=' ':')
+	fi
+	mkdir -p "$d/$dir"
 	# 第一轮一个目标一个目标地扫, 几个目标同时扫会一起挤爆同一批骨干路由器的回包限速
-	for item in $ROUTE_TARGETS; do
-		route_trace "${item#*:}" "$d/route/${item%%:*}.hops"
+	for item in $targets; do
+		route_trace "${item#*:}" "$d/$dir/${item%%:*}.hops" "$fam"
 	done
 	# 第二轮各目标同时补, 每个目标内部按顺序
-	for item in $ROUTE_TARGETS; do
-		route_retry "${item#*:}" "$d/route/${item%%:*}.hops" &
+	for item in $targets; do
+		route_retry "${item#*:}" "$d/$dir/${item%%:*}.hops" "$fam" &
 	done
 	wait
-	for item in $ROUTE_TARGETS; do
+	for item in $targets; do
 		key="${item%%:*}"
 		# 按跳数排序; 到达目标后后面的 TTL 都是目标自己回的, 同一个 IP 只留第一次
-		hops=$(sort -t: -k1,1n "$d/route/$key.hops" 2>/dev/null | awk -F: '!seen[$2]++' | paste -sd, -)
-		put "$d/route" "rt_$key" "${hops:-none}"
+		hops=$(sort -t"$sep" -k1,1n "$d/$dir/$key.hops" 2>/dev/null | awk -F"$sep" '!seen[$2]++' | paste -sd, -)
+		put "$d/$dir" "${prefix}_$key" "${hops:-none}"
 	done
-	if [ "$DEEP" = 1 ]; then route_rtt "$d/route"; fi
+	if [ "$DEEP" = 1 ]; then route_rtt "$d/$dir" "$sep"; fi
 }
 
-# 深度模式: 给每个跳点补上直接 ping 的延迟 (每批 16 个并发), 字段变成 TTL:IP:毫秒
+# 深度模式: 给每个跳点补上直接 ping 的延迟 (每批 16 个并发), 字段变成 TTL:IP:毫秒 (IPv6 为 TTL/IP/毫秒)
 route_rtt() {
-	local d="$1" ip n=0
-	for ip in $(sed -n 's/^rt_[a-z_]*=//p' "$d/fields" | tr ',' '\n' | cut -d: -f2 | sort -u); do
+	local d="$1" sep="${2:-:}" ip n=0
+	for ip in $(sed -n 's/^rt6*_[a-z_]*=//p' "$d/fields" | tr ',' '\n' | cut -d"$sep" -f2 | sort -u); do
 		(r=$(hop_rtt "$ip") && [ -n "$r" ] && echo "$ip $r" >>"$d/rtt") &
 		n=$((n + 1))
 		[ $((n % 16)) = 0 ] && wait
 	done
 	wait
 	[ -s "$d/rtt" ] || return 0
-	awk 'NR == FNR { r[$1] = $2; next }
+	awk -v sep="$sep" 'NR == FNR { r[$1] = $2; next }
 		{
 			split($0, kv, "=")
 			if (kv[2] == "none") { print; next }
 			n = split(kv[2], hops, ","); out = kv[1] "="
-			for (i = 1; i <= n; i++) { split(hops[i], h, ":"); out = out (i > 1 ? "," : "") hops[i] ((h[2] in r) ? ":" r[h[2]] : "") }
+			for (i = 1; i <= n; i++) { split(hops[i], h, sep); out = out (i > 1 ? "," : "") hops[i] ((h[2] in r) ? sep r[h[2]] : "") }
 			print out
 		}' "$d/rtt" "$d/fields" >"$d/fields.new" && mv "$d/fields.new" "$d/fields"
 }
@@ -1028,9 +1374,10 @@ speed_stream() {
 		dd if=/dev/zero bs=65536 count=61035 >&3 2>"$err" &
 	fi
 	pid=$!
-	sleep 2
+	# 默认去掉前 2 秒慢启动、计量 4 秒; 分省测速缩短为 1 + 3 秒
+	sleep "${SPEED_WARM:-2}"
 	kill -USR1 "$pid" 2>/dev/null
-	sleep 4
+	sleep "${SPEED_SPAN:-4}"
 	kill -USR1 "$pid" 2>/dev/null
 	sleep 0.2
 	kill -9 "$pid" 2>/dev/null
@@ -1111,6 +1458,73 @@ EOF
 	if [ -n "$cur" ]; then n=$((n + 1)); put "$d/speed" "sp_$n" "$best"; fi
 }
 
+# ── 分省测速 (-p / 全部检测): 国内各省三网的 Speedtest 节点 ────────────────────────
+# 节点取自 speedtest.cn 的公开节点清单 (整理: github.com/spiritLHLS/speedtest.cn-CN-ID, MIT), 只收能用上面
+# Speedtest TCP 协议测的 (8080 / 8088 端口), 2026-09-17 共 9 个省。这些节点大多拦截境外来源:
+# 从洛杉矶只能连上北京、上海、江苏的几个; 在国内的服务器上跑才测得全。
+# 先并发发 HI 看哪些能连上, 每个「省 × 运营商」只测第一个连得上的节点, 计量窗口缩短到 3 秒控制总时长。
+#   spc_<省>_<ct|cu|cm>=城市|下载Mbps|上传Mbps  或 fail (该组节点都连不上)
+CN_SPEED_NODES='bj|cu|北京|beijing.unicomtest.com:8080
+tj|cu|天津|speedtest3.online.tj.cn:8080
+sh|ct|上海|speedtest1.online.sh.cn:8080
+sh|cu|上海|5g.shunicomtest.com:8088
+sh|cu|上海|mobile.shunicomtest.com:8080
+js|ct|南京|5gnanjing.speedtest.jsinfo.net:8080
+js|ct|镇江|5gzhenjiang.speedtest.jsinfo.net:8080
+js|ct|苏州|4gsuzhou1.speedtest.jsinfo.net:8080
+js|cm|苏州|speedtest.jsqiuying.com:8080
+zj|ct|杭州|cesu-hz.zjtelecom.com.cn:8080
+zj|ct|宁波|cesu-nb.zjtelecom.com.cn:8080
+zj|cm|杭州|speedtest.139play.com:8080
+fj|cu|福州|36.250.1.90:8080
+fj|cm|福州|csfw.fj.chinamobile.com:8080
+hb|ct|武汉|vipspeedtest8.wuhan.net.cn:8080
+hn|ct|长沙|hntelecom5g.cn:8080
+sc|ct|成都|speedtest1.sc.189.cn:8080
+sc|cu|成都|cuscspeed.169ol.com:8080
+sc|cu|绵阳|mycuspeed.169ol.com:8080
+sc|cm|成都|speedtest1.sc.chinamobile.com:8080'
+
+run_speed_cn() {
+	local d="$1" n=0 prov carrier city hostport group cur="" done_group="" down up total=0 i=0
+	[ "$IS_LINUX" = 1 ] || return 0
+	mkdir -p "$d/spcn"
+	progress "$(t "[网络] 分省测速: 检查节点连通…" "[Network] Provincial speed: checking servers…")"
+	# 并发打招呼, 连得上的写进 ok 文件 (每批 10 个)
+	while IFS='|' read -r prov carrier city hostport; do
+		[ -n "$hostport" ] || continue
+		(speed_hello "$hostport" </dev/null && echo "$hostport" >>"$d/spcn/ok") &
+		n=$((n + 1))
+		[ $((n % 10)) = 0 ] && wait
+	done <<EOF
+$CN_SPEED_NODES
+EOF
+	wait
+	total=$(printf '%s\n' "$CN_SPEED_NODES" | cut -d'|' -f1,2 | sort -u | wc -l | tr -d ' ')
+	while IFS='|' read -r prov carrier city hostport; do
+		[ -n "$hostport" ] || continue
+		group="${prov}_$carrier"
+		if [ "$group" != "$cur" ]; then
+			# 上一组一个都没连上
+			[ -n "$cur" ] && [ "$done_group" != "$cur" ] && put "$d/spcn" "spc_$cur" fail
+			cur=$group
+			i=$((i + 1))
+		fi
+		[ "$done_group" = "$group" ] && continue
+		grep -qx "$hostport" "$d/spcn/ok" 2>/dev/null || continue
+		progress "$(t "[网络] 分省测速 $i/$total…" "[Network] Provincial speed $i/$total…")"
+		mkdir -p "$d/spcn/$group"
+		down=$(SPEED_WARM=1 SPEED_SPAN=3 speed_dir down "$hostport" "$d/spcn/$group" </dev/null)
+		up=$(SPEED_WARM=1 SPEED_SPAN=3 speed_dir up "$hostport" "$d/spcn/$group" </dev/null)
+		put "$d/spcn" "spc_$group" "$city|${down:-fail}|${up:-fail}"
+		done_group=$group
+	done <<EOF
+$CN_SPEED_NODES
+EOF
+	[ -n "$cur" ] && [ "$done_group" != "$cur" ] && put "$d/spcn" "spc_$cur" fail
+	return 0
+}
+
 run_intl_latency() {
 	local d="$1" item
 	mkdir -p "$d/intl"
@@ -1146,12 +1560,25 @@ stage_net() {
 	if ! skipped latency; then
 		progress "$(t "[网络] 三网延迟 (31 省)…" "[Network] China latency (31 provinces)…")"
 		run_latency "$d"
+		if [ "$NET_V6" = yes ]; then
+			progress "$(t "[网络] 三网延迟 IPv6…" "[Network] China latency over IPv6…")"
+			set_net 6
+			run_latency "$d" 6
+			set_net 4
+		fi
 	fi
 	if ! skipped route; then
 		progress "$(t "[网络] 三网回程线路…" "[Network] Return routes to China…")"
 		run_route "$d"
+		if [ "$NET_V6" = yes ]; then
+			progress "$(t "[网络] 三网回程线路 IPv6…" "[Network] Return routes over IPv6…")"
+			run_route "$d" 6
+		fi
 	fi
-	if ! skipped speed; then run_speed "$d"; fi
+	if ! skipped speed; then
+		run_speed "$d"
+		[ "$CN_SPEED" = 1 ] && run_speed_cn "$d"
+	fi
 	cat "$d"/*/fields >>"$d/fields" 2>/dev/null
 	[ "$DEEP" = 1 ] && put "$d" deep 1
 	progress_done
@@ -1164,12 +1591,17 @@ stage_route() {
 	if [ "$DEEP" = 1 ] && [ -s "$TMP/net/route/fields" ]; then
 		# 全部检测: 网络阶段已按深度模式追踪过回程 (带每跳延迟), 直接复用, 不再追踪一遍; 不报用时 (报 0 秒会让人误解)
 		cat "$TMP/net/route/fields" >>"$d/fields"
+		cat "$TMP/net/route6/fields" >>"$d/fields" 2>/dev/null
 		ROUTE_REUSED=1
 	else
 		set_net 4
 		progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
 		DEEP=1
 		run_route "$d"
+		if [ -n "$(curl -6 -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ]; then
+			progress "$(t "[网络] 逐跳回程路由 IPv6…" "[Network] Hop-by-hop routes over IPv6…")"
+			run_route "$d" 6
+		fi
 		cat "$d"/*/fields >>"$d/fields" 2>/dev/null
 	fi
 	put "$d" deep 1
@@ -1215,7 +1647,7 @@ menu_select() {
 	local choice
 	if [ "$LANG_OPT" = en ]; then
 		printf '  %s%s1%s  Full check-up    hardware → IP → network   %sabout 6 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  All checks       full + deep + hop routes  %sabout 8 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  All checks       + Geekbench, provinces    %sabout 15 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  Hardware         CPU memory disk scores    %sabout 2 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP quality       purity unlocks blacklists %sabout 30 s%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  Network          BGP latency routes speed  %sabout 3 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -1223,7 +1655,7 @@ menu_select() {
 		printf '  %s0  Exit%s\n\n  Choose [1]: ' "$C_K" "$C_0"
 	else
 		printf '  %s%s1%s  一键全检      硬件 → IP → 网络      %s约 6 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  全部检测      含深度模式与逐跳路由  %s约 8 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  全部检测      Geekbench 分省测速    %s约 15 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  硬件与性能    系统 CPU 内存 硬盘    %s约 2 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP 质量       纯净度 解锁 黑名单    %s约 30 秒%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  网络质量      BGP 延迟 回程 测速    %s约 3 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -1235,6 +1667,8 @@ menu_select() {
 	2)
 		STAGES=" hw ip net route"
 		DEEP=1
+		GEEKBENCH=1
+		CN_SPEED=1
 		;;
 	3) STAGES=" hw" ;;
 	4) STAGES=" ip" ;;
@@ -1340,7 +1774,7 @@ while [ $# -gt 0 ]; do
 			[ "${ROUTE_REUSED:-0}" = 1 ] && [ "$stage" = route ] || put "$TMP/$stage" dur $(($(date +%s) - start))
 			if post_report "$stage" "$TMP/$stage/fields" "$TMP/$stage/report" 4; then
 				# 回程详情和网络质量的逐跳字段同名, 两段都跑时总览只收一份 (同名字段会被解析成数组), 用时照加
-				if [ "$stage" = route ] && grep -q '^rt_' "$ALL"; then
+				if [ "$stage" = route ] && grep -q '^rt6*_' "$ALL"; then
 					grep '^dur=' "$TMP/$stage/fields" >>"$ALL"
 				else
 					cat "$TMP/$stage/fields" >>"$ALL"

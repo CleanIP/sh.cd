@@ -109,8 +109,8 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
   // —— 回程路由详情: 每一跳查归属 (只用本地地理库) ——
   if (stage === "route") {
     const net = parseNet(body)
-    const ips = [...new Set((net?.routes || []).flatMap((r) => r.hops.map((h) => h.ip)))]
-      .filter((ip) => !/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip)).slice(0, 80)
+    const ips = [...new Set([...(net?.routes || []), ...(net?.routes6 || [])].flatMap((r) => r.hops.map((h) => h.ip)))]
+      .filter((ip) => !/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|f[cd]|fe80)/i.test(ip)).slice(0, 160)
     const geo = await geoLookup(ips, caller)
     const hops: Record<string, HopInfo> = {}
     for (const ip of ips) {
@@ -119,7 +119,8 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
       const place = zh ? [row.geo?.country, row.geo?.region !== row.geo?.city ? row.geo?.region : "", row.geo?.city] : [row.geo?.country_en || row.geo?.country, row.geo?.city]
       hops[ip] = { asn: row.network?.asn || undefined, org: row.network?.asn_org || row.network?.asn_name || undefined, place: place.filter(Boolean).join(" ") || undefined }
     }
-    if (asJson) return json({ ok: true, stage, routes: net?.routes.map((r) => ({ ...r, line: line(r), hops: r.hops.map((h) => ({ ...h, ...hops[h.ip] })) })) })
+    const withInfo = (rows: NonNullable<typeof net>["routes"] | undefined) => rows?.map((r) => ({ ...r, line: line(r), hops: r.hops.map((h) => ({ ...h, ...hops[h.ip] })) }))
+    if (asJson) return json({ ok: true, stage, routes: withInfo(net?.routes), routes6: withInfo(net?.routes6) })
     header(zh ? ROUTE_TITLE[0] : ROUTE_TITLE[1])
     if (net) out.push(...renderRouteDetail(R, net, hops))
     // 全部检测时后面还有总览, 页脚留给总览
@@ -131,7 +132,7 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
   if (stage === "net") {
     const net = parseNet(body)
     const bgp = await bgpInfo((await fetchIp(caller)).r)
-    if (asJson) return json({ ok: true, stage, network: net && { ...net, routes: net.routes.map((r) => ({ ...r, line: line(r) })) }, bgp })
+    if (asJson) return json({ ok: true, stage, network: net && { ...net, routes: net.routes.map((r) => ({ ...r, line: line(r) })), routes6: net.routes6.map((r) => ({ ...r, line: line(r) })) }, bgp })
     header(zh ? NET_TITLE[0] : NET_TITLE[1])
     if (net) out.push(...renderNet(R, net, bgp))
     if (single) footer()

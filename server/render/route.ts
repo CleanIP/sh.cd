@@ -10,6 +10,8 @@
 //
 // 探测在用户机器上用 ping 按 TTL 逐跳完成 (check.sh run_route), 这里只做判定, 规则可以随时调整而不用改脚本。
 
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import type { Pair, Tone } from "./base"
 
 export interface RouteHop {
@@ -40,8 +42,72 @@ function isCMIN2(o: number[]): boolean {
     || t === 74 || t === 75 || t === 88 || t === 89 || t === 100 || t === 252 || t === 253
 }
 
-/** 骨干网 ASN, 认不出返回 null */
+// —— IPv6: 骨干网段前缀取自 oneclickvirt/backtrace 的 bk/prefix/as*.txt (Apache-2.0, 见 prefix/NOTICE) ——
+// 两种写法: CIDR ("2400:9380:9001::/48", 按位匹配) 与文本前缀 ("2402:4f00", 按地址文本开头匹配, 与参考实现一致);
+// 多个命中取最长的。前缀最短 /20, 按地址第一组建索引。
+
+const V6_ASNS = ["AS4809", "AS4134", "AS9929", "AS10099", "AS4837", "AS58807", "AS9808", "AS58453", "AS23764"]
+
+export function v6ToBigInt(ip: string): bigint | null {
+  const s = ip.toLowerCase()
+  if (!/^[0-9a-f:]+$/.test(s) || (s.match(/::/g)?.length ?? 0) > 1) return null
+  const [head = "", tail] = s.includes("::") ? s.split("::") : [s, undefined]
+  const h = head ? head.split(":") : []
+  const t = tail ? tail.split(":") : []
+  const groups = tail === undefined ? h : [...h, ...Array(8 - h.length - t.length).fill("0"), ...t]
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null
+  return groups.reduce((acc, g) => (acc << 16n) | BigInt(parseInt(g, 16)), 0n)
+}
+
+interface V6Prefix { asn: string, bits: number, net?: bigint, text?: string }
+let v6Index: Map<string, V6Prefix[]> | null = null
+
+function loadV6(): Map<string, V6Prefix[]> {
+  if (v6Index) return v6Index
+  const index = new Map<string, V6Prefix[]>()
+  const add = (key: string, p: V6Prefix) => index.set(key, [...(index.get(key) ?? []), p])
+  for (const asn of V6_ASNS) {
+    let text = ""
+    try {
+      text = readFileSync(resolve(import.meta.dir, `prefix/${asn.toLowerCase()}.txt`), "utf8")
+    } catch {
+      continue
+    }
+    for (const raw of text.split("\n")) {
+      const line = raw.trim().toLowerCase()
+      if (!line) continue
+      if (line.includes("/")) {
+        const [addr, len] = line.split("/")
+        const bits = Number(len)
+        const n = v6ToBigInt(addr!)
+        if (n === null || !(bits >= 16 && bits <= 128)) continue
+        add(String((n >> 112n) & 0xffffn), { asn, bits, net: n >> BigInt(128 - bits) })
+      } else {
+        const first = parseInt(line.split(":")[0]!, 16)
+        if (Number.isNaN(first)) continue
+        add(String(first), { asn, bits: line.replace(/:/g, "").length * 4, text: line })
+      }
+    }
+  }
+  v6Index = index
+  return index
+}
+
+function hopAsn6(ip: string): string | null {
+  const n = v6ToBigInt(ip)
+  if (n === null) return null
+  const lower = ip.toLowerCase()
+  let best: V6Prefix | null = null
+  for (const p of loadV6().get(String((n >> 112n) & 0xffffn)) ?? []) {
+    const hit = p.net !== undefined ? n >> BigInt(128 - p.bits) === p.net : lower.startsWith(p.text!)
+    if (hit && (!best || p.bits > best.bits || (p.bits === best.bits && p.asn < best.asn))) best = p
+  }
+  return best?.asn ?? null
+}
+
+/** 骨干网 ASN, 认不出返回 null (IPv4 按网段规则, IPv6 按前缀表) */
 export function hopAsn(ip: string): string | null {
+  if (ip.includes(":")) return hopAsn6(ip)
   const o = octets(ip)
   if (!o) return null
   const [a, b] = o as [number, number, number, number]
