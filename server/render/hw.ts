@@ -220,7 +220,7 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
   if (hw.cpu) {
     const [model, cores, threads, , mhz, usage] = hw.cpu
     if (model) putWrapped(L(T.model), model)
-    const bits = [zh ? `${cores} 核 ${threads} 线程` : `${cores} cores ${threads} threads`]
+    const bits = [zh ? `${cores} 核 ${threads} 线程` : `${cores} core${cores === "1" ? "" : "s"} ${threads} thread${threads === "1" ? "" : "s"}`]
     if (num(mhz) !== null) bits.push(`${mhz} MHz`)
     if (num(usage) !== null) bits.push(zh ? `占用 ${usage}%` : `${usage}% busy`)
     put(L(T.cores), bits.join(" · "))

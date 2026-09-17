@@ -2,14 +2,13 @@
 // 数值取自真实运行的量级, IP、网段、ASN、主机名都是文档示例值 (203.0.113.0/24、AS64500), 不指向任何真实机器。
 // 各段用和线上报告完全相同的排版函数生成, 报告格式改了示例自动跟上。
 
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
 import { createRenderer, renderBanner, renderIpSections, stageBar, type Lang } from "./render/base"
 import { HW_TITLE, parseHw, renderHw } from "./render/hw"
 import { renderIpDetail, type FullReport } from "./render/ip"
 import { MAIL, parseIpcheckFields, PROVINCES, renderLocalSections } from "./render/local"
 import { NET_TITLE, parseNet, renderNet, type BgpInfo } from "./render/net"
 import { renderSummary } from "./render/summary"
+import { VERSION } from "./version"
 
 const HW_FIELDS = {
   hw_os: "Debian GNU/Linux 13 (trixie)|6.12.74+deb13+1-amd64|x86_64",
@@ -122,8 +121,6 @@ function sampleIp(lang: Lang): FullReport & { ip: string } {
   }
 }
 
-// 版本号跟着脚本走, 发新版不用改这里
-const VERSION = /^VERSION="([\d.]+)"$/m.exec(readFileSync(resolve(import.meta.dir, "../check.sh"), "utf8"))?.[1] ?? ""
 
 export type SampleTab = "summary" | "hw" | "ip" | "net"
 

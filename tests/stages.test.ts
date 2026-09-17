@@ -191,9 +191,13 @@ test("缓存按实例换算, 已用比例与 df 一致", async () => {
 
 test("延迟: SYN 重传的样本算丢包, 不拉高中位数", async () => {
   const { rttSamples } = await import("../server/render/util");
-  expect(rttSamples([189, 1199, 1193, null, 196])).toEqual([189, null, null, null, 196]);
-  const net = parseNet({ lat_bj_ct: "189,1199,1193,0,196" })!;
-  expect(renderNet(createRenderer("zh", false), net, null).join("\n")).toMatch(/北京\s+\S{5}\s+193/);
+  // 超过 1 秒的是 SYN 重传: 扣掉 1 秒初始重传超时还原延迟, 同时计入丢包
+  expect(rttSamples([189, 1199, 1193, null, 196])).toEqual({ values: [189, 199, 193, null, 196], lost: 3 });
+  const net = parseNet({ lat_bj_ct: "189,1199,1193,0,196", lat_tj_ct: "1191,1188,1203,0,1195" })!;
+  const text = renderNet(createRenderer("zh", false), net, null).join("\n");
+  expect(text).toMatch(/北京\s+\S{5}\s+195/);
+  // 每次都重传时也还原成真实延迟, 不显示一千多毫秒
+  expect(text).toMatch(/天津\s+\S{5}\s+193/);
 });
 
 test("总览带宽: 就近节点单向受限时改取境外节点", () => {

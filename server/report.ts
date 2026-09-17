@@ -122,7 +122,8 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     if (asJson) return json({ ok: true, stage, routes: net?.routes.map((r) => ({ ...r, line: line(r), hops: r.hops.map((h) => ({ ...h, ...hops[h.ip] })) })) })
     header(zh ? ROUTE_TITLE[0] : ROUTE_TITLE[1])
     if (net) out.push(...renderRouteDetail(R, net, hops))
-    footer()
+    // 全部检测时后面还有总览, 页脚留给总览
+    if (single) footer()
     return done()
   }
 

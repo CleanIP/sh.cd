@@ -3,6 +3,7 @@
 //   GET  /            curl / wget 拿到检测脚本 check.sh; 浏览器 (Accept 带 text/html) 拿到说明页, ?raw=1 强制返回脚本
 //   POST /report      生成报告 (server/report.ts)
 //   POST /dns/start   DNS 出口检测: 发一个一次性子域名
+//   GET  /changelog   更新日志: 浏览器给网页, curl 给 Markdown 纯文本 (server/changelog.ts)
 //   GET  /fonts/*    首页字体 Ioskeley Mono (SIL OFL 1.1, 授权文本 /fonts/OFL.txt)
 //   GET  /healthz
 //
@@ -11,6 +12,7 @@
 
 import { readFile, stat } from "node:fs/promises"
 import { resolve } from "node:path"
+import { changelogPage, changelogText } from "./changelog"
 import { landingPage } from "./landing"
 import { langOf } from "./render/base"
 import { handleReport, type Form } from "./report"
@@ -61,6 +63,15 @@ const server = Bun.serve({
         return new Response(landingPage(lang), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", vary: "Accept" } })
       }
       return script()
+    }
+
+    if (url.pathname === "/changelog" && (req.method === "GET" || req.method === "HEAD")) {
+      const lang = langOf(url.searchParams.get("lang") ?? ((req.headers.get("accept-language") || "zh").startsWith("zh") ? "zh" : "en"))
+      const headers = { "cache-control": "no-cache", vary: "Accept" }
+      if ((req.headers.get("accept") || "").includes("text/html") && !url.searchParams.has("raw")) {
+        return new Response(changelogPage(lang), { headers: { ...headers, "content-type": "text/html; charset=utf-8" } })
+      }
+      return new Response(changelogText(lang), { headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
     }
 
     if (url.pathname === "/report" && req.method === "POST") {

@@ -96,14 +96,16 @@ export function spark(samples: Array<number | null>, lo: number, hi: number): st
 }
 
 /**
- * TCP 握手耗时里比最快一次多出 900ms 以上的, 是首个 SYN 丢了、等 1 秒重传才连上 (Linux / macOS 初始 RTO 都是 1 秒),
- * 算丢包而不算延迟, 否则一次重传就把中位数和平均值拉到一千多毫秒 (2026-09-17 塔什干家宽实测河北电信 1269ms)
+ * TCP 握手耗时超过 1 秒的, 是首个 SYN 丢了、等初始重传超时 (Linux / macOS 都是 1 秒) 才连上: 实际延迟 = 耗时 − 1000ms,
+ * 同时记一次丢包。不还原的话一次重传就把中位数拉到一千多毫秒 (2026-09-17 塔什干家宽河北电信 1269ms);
+ * 线路差到每次都要重传时, 连「最快一次」也超过 1 秒 (香港机北京电信 1191ms), 所以不能按相对最快一次判断。
+ * 脚本的建连超时是 2 秒, 不会出现第二次重传 (3 秒)。
  */
-export function rttSamples(samples: Array<number | null>): Array<number | null> {
-  const ok = samples.filter((s): s is number => s !== null)
-  if (!ok.length) return samples
-  const lo = Math.min(...ok)
-  return samples.map((s) => (s !== null && s > lo + 900 ? null : s))
+export function rttSamples(samples: Array<number | null>): { values: Array<number | null>, lost: number } {
+  return {
+    values: samples.map((s) => (s === null ? null : s >= 1000 ? Math.max(s - 1000, 0.1) : s)),
+    lost: samples.filter((s) => s === null || s >= 1000).length,
+  }
 }
 
 export function median(xs: number[]): number | null {

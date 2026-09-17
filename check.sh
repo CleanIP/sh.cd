@@ -14,7 +14,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -1162,8 +1162,9 @@ stage_route() {
 	mkdir -p "$d"
 	: >"$d/fields"
 	if [ "$DEEP" = 1 ] && [ -s "$TMP/net/route/fields" ]; then
-		# 全部检测: 网络阶段已按深度模式追踪过回程 (带每跳延迟), 直接复用, 不再追踪一遍
+		# 全部检测: 网络阶段已按深度模式追踪过回程 (带每跳延迟), 直接复用, 不再追踪一遍; 不报用时 (报 0 秒会让人误解)
 		cat "$TMP/net/route/fields" >>"$d/fields"
+		ROUTE_REUSED=1
 	else
 		set_net 4
 		progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
@@ -1336,7 +1337,7 @@ while [ $# -gt 0 ]; do
 			printf '  %s\n' "$(t "代理模式下网络质量测的是本机而不是代理出口, 已跳过" "Network checks measure this machine, not the proxy exit — skipped")" >&2
 		else
 			"stage_$stage"
-			put "$TMP/$stage" dur $(($(date +%s) - start))
+			[ "${ROUTE_REUSED:-0}" = 1 ] && [ "$stage" = route ] || put "$TMP/$stage" dur $(($(date +%s) - start))
 			if post_report "$stage" "$TMP/$stage/fields" "$TMP/$stage/report" 4; then
 				# 回程详情和网络质量的逐跳字段同名, 两段都跑时总览只收一份 (同名字段会被解析成数组), 用时照加
 				if [ "$stage" = route ] && grep -q '^rt_' "$ALL"; then

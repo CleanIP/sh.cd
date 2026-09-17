@@ -40,7 +40,7 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
   if (hw) {
     const a: string[] = []
     if (hw.virt) a.push(L(VIRT_SHORT[hw.virt] ?? [hw.virt, hw.virt]))
-    if (hw.cpu) a.push(zh ? `${hw.cpu[1]} 核` : `${hw.cpu[1]} cores`)
+    if (hw.cpu) a.push(zh ? `${hw.cpu[1]} 核` : `${hw.cpu[1]} core${hw.cpu[1] === "1" ? "" : "s"}`)
     const mem = hw.mem ? num(hw.mem[0]) : null
     if (mem) a.push(fmtBytes(mem))
     const disk = hw.disk ? num(hw.disk[1]) : null
@@ -69,7 +69,10 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
       a.push(`${badge(`${pur.score}${pur.grade ? ` ${pur.grade}` : ""}`, tone(pur.score))} ${zh ? "纯净度" : "purity"}`)
     }
     // 总览里去掉 " IP" 后缀省列宽: 机房 / 住宅 / 移动 …
-    if (pur.ip_type) a.push(ipTypeText(String(pur.ip_type), lang).replace(/ IP$/, ""))
+    if (pur.ip_type) {
+      const type = ipTypeText(String(pur.ip_type), lang).replace(/ IP$/, "")
+      a.push(zh ? type : type.toLowerCase())
+    }
     if (pur.native_label) a.push(String(pur.native_label).startsWith("Native") ? (zh ? "原生" : "native") : (zh ? "广播" : "broadcast"))
     line(L(T.ip), a.join(" · "))
     const b: string[] = []
@@ -107,7 +110,7 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
     }
     if (a.length) line(L(T.net), a.join(" · "))
     const b: string[] = []
-    const meds = net.latency.map((x) => median(rttSamples(x.samples).filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
+    const meds = net.latency.map((x) => median(rttSamples(x.samples).values.filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
     if (meds.length) b.push(`${zh ? "三网平均" : "China avg"} ${paint(`${Math.round(meds.reduce((s, m) => s + m, 0) / meds.length)} ms`, "bold")}`)
     // 本机带宽: 就近节点上下行正常 (相差不到 5 倍) 就用它; 否则就近节点多半自己限速
     // (2026-09-17 香港机排到新竹, 下载 45 Mbps、上传 1.15 Gbps), 改取境外节点里上下行较小值最大的一个。

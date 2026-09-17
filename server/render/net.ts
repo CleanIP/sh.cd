@@ -137,7 +137,7 @@ const T = {
   peering: ["接入", "Peering"],
   upstream: ["上游", "Upstreams"],
   latency: ["三网延迟", "China carrier latency"],
-  latencyNote: ["TCP 握手 5 次, 走势 + 中位数 ms, × 为丢包", "5 TCP handshakes: trend + median ms, × = lost"],
+  latencyNote: ["TCP 握手 5 次, 走势 + 中位数 ms, × 为超时, 重传计入丢包", "5 TCP handshakes: trend + median ms, × = timeout"],
   avg: ["平均", "Average"],
   ct: ["电信", "Telecom"],
   cu: ["联通", "Unicom"],
@@ -251,13 +251,12 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
       const value = rtrim(CARRIERS.map((c) => {
         const cell = cells.find((x) => x.carrier === c)
         if (!cell) return pad("-", COL)
-        const samples = rttSamples(cell.samples)
+        const { values: samples, lost } = rttSamples(cell.samples)
         const ok = samples.filter((s): s is number => s !== null)
         const m = median(ok)
         if (m === null) return tonePaint(pad(zh ? "×××××  超时" : "×××××  timeout", COL), "bad")
         medians[c]!.push(m)
         const lo = Math.min(...ok)
-        const lost = samples.length - ok.length
         const tone: Tone = lost ? "warn" : latencyTone(m)
         return paint(spark(samples, lo, Math.max(Math.max(...ok), lo + 20)), "gray") + " " + tonePaint(padL(String(Math.round(m)), 4), tone) + " ".repeat(COL - 10)
       }).join(""))
