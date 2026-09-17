@@ -129,7 +129,8 @@ export type SampleTab = "summary" | "hw" | "ip" | "net"
 
 /** 四段示例报告 (带 ANSI 颜色), 首页按标签切换 */
 export function sampleReports(lang: Lang): Record<SampleTab, string> {
-  const R = createRenderer(lang, true)
+  // 和线上报告一样按示例 IP 打码
+  const R = createRenderer(lang, true, "203.0.113.8")
   const zh = lang === "zh"
   const header = renderBanner(R,
     zh ? "服务器体检 · 硬件与性能 · IP 质量 · 网络质量" : "Server check-up · Hardware · IP quality · Network",

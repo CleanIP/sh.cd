@@ -14,7 +14,7 @@
 
 import { hitStats, recordHit } from "./hits"
 import { rateLimit, rateLimitKey } from "./limit"
-import { createRenderer, fullReportUrl, langOf, renderHeader, renderIpSections, stageBar } from "./render/base"
+import { createRenderer, langOf, renderHeader, renderIpSections, stageBar } from "./render/base"
 import { HW_TITLE, parseHw, renderHw } from "./render/hw"
 import { renderIpDetail } from "./render/ip"
 import { parseIpcheckFields, renderLocalSections } from "./render/local"
@@ -65,7 +65,8 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
   const dur = /^\d{1,5}$/.test(one("dur") || "") ? Number(one("dur")) : null
   const single = one("stages") === "1"
 
-  const R = createRenderer(lang, one("color") === "1")
+  // 文本报告里本机所在网段的 IP 只留前两段, 截图可以直接分享; JSON 是给用户自己存档的, 保留完整数据
+  const R = createRenderer(lang, one("color") === "1", caller)
   const { paint } = R
   const out: string[] = []
   const done = () => text(200, out.join("\n"))
@@ -84,9 +85,8 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     }
     out.push(stageBar(R, stageTitle, dur), "")
   }
-  const footer = (ip?: string) => {
+  const footer = () => {
     out.push("")
-    if (ip) out.push(`  ${zh ? "完整报告" : "Full report"}: ${paint(fullReportUrl(lang, ip), "brand", "underline")}`)
     const today = hits.today.toLocaleString("en-US")
     const total = hits.total.toLocaleString("en-US")
     out.push(paint(zh ? `  脚本检测: 今日 ${today} 次 · 累计 ${total} 次` : `  Script runs: ${today} today · ${total} total`, "gray"))
@@ -150,7 +150,7 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
       net: parseNet(body),
       took: sumDur(body.dur),
     }))
-    footer(r?.ip)
+    footer()
     return done()
   }
 
@@ -174,7 +174,6 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     out.push(R.hr())
   }
   out.push(...renderLocalSections(R, local, dns))
-  if (single) footer(r?.ip)
-  else if (r) out.push("", `  ${zh ? "完整报告" : "Full report"}: ${paint(fullReportUrl(lang, r.ip!), "brand", "underline")}`)
+  if (single) footer()
   return done()
 }

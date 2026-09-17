@@ -95,6 +95,17 @@ export function spark(samples: Array<number | null>, lo: number, hi: number): st
   }).join("")
 }
 
+/**
+ * TCP 握手耗时里比最快一次多出 900ms 以上的, 是首个 SYN 丢了、等 1 秒重传才连上 (Linux / macOS 初始 RTO 都是 1 秒),
+ * 算丢包而不算延迟, 否则一次重传就把中位数和平均值拉到一千多毫秒 (2026-09-17 塔什干家宽实测河北电信 1269ms)
+ */
+export function rttSamples(samples: Array<number | null>): Array<number | null> {
+  const ok = samples.filter((s): s is number => s !== null)
+  if (!ok.length) return samples
+  const lo = Math.min(...ok)
+  return samples.map((s) => (s !== null && s > lo + 900 ? null : s))
+}
+
 export function median(xs: number[]): number | null {
   if (!xs.length) return null
   const s = [...xs].sort((a, b) => a - b)

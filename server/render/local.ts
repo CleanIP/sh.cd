@@ -2,7 +2,7 @@
 //
 // 脚本在用户机器上测流媒体 / AI 解锁、邮件 25 端口、三网 TCP 延迟与回程线路、DNS 出口、带宽, 以表单字段提交:
 //   media_<服务>=yes|US       yes | no | originals | web | fail, 竖线后是地区码 (Gemini 为三位码)
-//   mail_<邮箱>=ok|fail
+//   mail_<邮箱>=ok|reject|fail   reject = 连上了但对方回 4xx/5xx 拒收
 //   lat_<省>_<ct|cu|cm>=155.1|0   毫秒|4 次里失败次数, 或 fail
 //   rt_<bj|sh|gd>_<ct|cu|cm>=3:59.43.1.1,4:202.97.1.1   回程逐跳 TTL:IP, 一跳都没回应为 none
 //   sp_<n>=<near|ct|cu|cm>|<节点>|<下载 Mbps>|<上传 Mbps>   测不出为 fail; 节点: 就近节点为城市名原文, 三网为省份代码
@@ -57,12 +57,13 @@ export const ROUTE_CITIES: Array<[code: string, zh: string, en: string]> = [
 const CARRIERS = ["ct", "cu", "cm"] as const
 type Carrier = typeof CARRIERS[number]
 
-export type MediaStatus = "yes" | "no" | "originals" | "web" | "fail"
+export type MediaStatus = "yes" | "no" | "originals" | "web" | "nov6" | "fail"
+export type MailStatus = "ok" | "reject" | "fail"
 
 export interface IpcheckLocal {
   media: Record<string, { status: MediaStatus, region: string }>
   /** 没测 (IPv6 / 代理 / 指定网卡 / -S mail) 时为 null */
-  mail: Record<string, boolean> | null
+  mail: Record<string, MailStatus> | null
   latency: Array<{ province: string, carrier: Carrier, ms: number | null, lost: number }>
   /** hops 为空数组 = 一跳都没回应 */
   routes: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
@@ -84,15 +85,15 @@ export function parseIpcheckFields(body: Record<string, unknown>): IpcheckLocal 
   const local: IpcheckLocal = { media: {}, mail: null, latency: [], routes: [], speed: null, dnsUuid: null }
 
   for (const [key] of MEDIA) {
-    const m = /^(yes|no|originals|web|fail)(?:\|([A-Z]{2,3})?)?$/.exec(str(body[`media_${key}`]))
+    const m = /^(yes|no|originals|web|nov6|fail)(?:\|([A-Z]{2,3})?)?$/.exec(str(body[`media_${key}`]))
     if (m) local.media[key] = { status: m[1] as MediaStatus, region: m[2] || "" }
   }
 
   for (const [key] of MAIL) {
     const v = str(body[`mail_${key}`])
-    if (v !== "ok" && v !== "fail") continue
+    if (v !== "ok" && v !== "reject" && v !== "fail") continue
     local.mail ??= {}
-    local.mail[key] = v === "ok"
+    local.mail[key] = v
   }
 
   for (const [prov] of PROVINCES) {
@@ -165,6 +166,7 @@ const T = {
   web: ["仅网页版", "Web only"],
   no: ["不可用", "Unavailable"],
   fail: ["检测失败", "Check failed"],
+  nov6: ["不支持 IPv6", "No IPv6"],
   mail: ["邮件", "Mail"],
   port25: ["25 端口出站", "Outbound port 25"],
   open: ["开放", "Open"],
@@ -216,7 +218,8 @@ export function renderLocalSections(R: Renderer, local: IpcheckLocal, dns: DnsRe
         : status === "originals" ? [T.originals, "warn"]
           : status === "web" ? [T.web, "warn"]
             : status === "no" ? [T.no, "bad"]
-              : [T.fail, "neutral"]
+              : status === "nov6" ? [T.nov6, "neutral"]
+                : [T.fail, "neutral"]
       const code = region ? regionCode(region) : ""
       out.push(row(name, badge(L(text), tone) + (code && status !== "fail" ? paint(`  ${code}`, "gray") : "")))
     }
@@ -225,17 +228,21 @@ export function renderLocalSections(R: Renderer, local: IpcheckLocal, dns: DnsRe
 
   if (local.mail) {
     const results = MAIL.filter(([key]) => local.mail![key] !== undefined)
-    const anyOk = results.some(([key]) => local.mail![key])
+    // 端口是否放行看有没有连上: 被拒收也说明 25 端口是通的
+    const anyOk = results.some(([key]) => local.mail![key] !== "fail")
+    const anyReject = results.some(([key]) => local.mail![key] === "reject")
     out.push(title(T.mail))
     out.push(row(L(T.port25), anyOk
       ? badge(L(T.open), "good")
       : badge(L(T.blocked), "bad") + paint(`  ${L(T.blockedHint)}`, "gray")))
     if (anyOk) {
-      const marks = results.map(([key, name]) => pad(name, 9) + (local.mail![key] ? tonePaint("✓", "good") : tonePaint("✗", "bad")))
+      const mark = { ok: tonePaint("✓", "good"), reject: tonePaint("!", "warn"), fail: tonePaint("✗", "bad") }
+      const marks = results.map(([key, name]) => pad(name, 9) + mark[local.mail![key]!])
       // 一行 3 个, 6 个挤一行会超出报告宽度; 名字补齐到同宽, 上下两行才对得齐
       for (let i = 0; i < marks.length; i += 3) {
         out.push(row(i === 0 ? L(T.handshake) : "", marks.slice(i, i + 3).join("   ")))
       }
+      if (anyReject) out.push(row("", paint(lang === "zh" ? "! 连上但被拒收, 多为 IP 信誉原因" : "! connected but refused (IP reputation)", "gray")))
     }
     out.push(hr())
   }
@@ -334,8 +341,9 @@ export function renderLocalSections(R: Renderer, local: IpcheckLocal, dns: DnsRe
     for (const g of groups.values()) {
       const more = g.count > 1 ? paint(lang === "zh" ? `  等 ${g.count} 个节点` : `  +${g.count - 1} more`, "gray") : ""
       // IPv6 地址放不进标签列, 另起一行缩进写归属
-      if (g.first.length < R.labelW) out.push(row(g.first, g.info + more))
-      else out.push(`  ${g.first}`, row("", g.info + more))
+      const shown = R.ip(g.first)
+      if (shown.length < R.labelW) out.push(row(shown, g.info + more))
+      else out.push(`  ${shown}`, row("", g.info + more))
     }
     out.push(hr())
   }

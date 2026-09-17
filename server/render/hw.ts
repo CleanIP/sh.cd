@@ -130,9 +130,9 @@ const T = {
   used: ["已用", "used"],
   avail: ["可用", "free"],
   swap: ["Swap", "Swap"],
-  overcommit: ["超开迹象", "Overcommit"],
-  balloon: ["气球回收", "balloon"],
-  ksm: ["KSM 合并", "KSM"],
+  overcommit: ["内存气球", "Memory balloon"],
+  balloonOn: ["已启用", "Enabled"],
+  balloonOff: ["未启用", "Not present"],
   memBench: ["读写带宽", "Throughput"],
   read: ["读", "read"],
   write: ["写", "write"],
@@ -152,6 +152,15 @@ const CASES: Array<[key: string, label: Pair]> = [
   ["s1q1", ["顺序 1M Q1", "Seq 1M Q1"]],
   ["s1q8", ["顺序 1M Q8", "Seq 1M Q8"]],
 ]
+
+/** lscpu 新版给的缓存是所有实例合计 ("512 KiB (16 instances)"), 换算成每个实例; 旧版格式 ("32K") 原样 */
+export function cachePerInstance(v: string): string {
+  const m = /^([\d.]+)\s*([KMG])(?:i?B)?\s*\((\d+) instances?\)$/i.exec(v.trim())
+  if (!m) return v.replace(/\s*\(.*\)$/, "")
+  const kib = Number(m[1]) * { K: 1, M: 1024, G: 1024 * 1024 }[m[2]!.toUpperCase() as "K" | "M" | "G"] / Number(m[3])
+  const [n, unit] = kib >= 1024 * 1024 ? [kib / 1024 / 1024, "GiB"] : kib >= 1024 ? [kib / 1024, "MiB"] : [kib, "KiB"]
+  return `${Number(n.toFixed(1))} ${unit}`
+}
 
 export function renderHw(R: Renderer, hw: HwData): string[] {
   const { L, paint, tonePaint, badge, hr, row, lang, labelW } = R
@@ -218,7 +227,7 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
   }
   if (hw.cache?.some(Boolean)) {
     const names = ["L1d", "L1i", "L2", "L3"]
-    const text = hw.cache.map((v, i) => (v ? `${names[i]} ${v}` : "")).filter(Boolean).join(" · ")
+    const text = hw.cache.map((v, i) => (v ? `${names[i]} ${cachePerInstance(v)}` : "")).filter(Boolean).join(" · ")
     putWrapped(L(T.cache), text)
   }
   if (hw.flags) {
@@ -277,26 +286,32 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
   if (hw.overcommit) {
     const oc = hw.overcommit[0]!.split(",")
     const balloon = oc.includes("balloon")
-    const ksm = oc.includes("ksm")
-    const mark = (on: boolean, label: Pair) => (on ? tonePaint(`! ${L(label)}`, "warn") : paint(`✗ ${L(label)}`, "gray"))
-    put(L(T.overcommit), `${mark(balloon, T.balloon)}   ${hw.overcommit[1] === "1" ? mark(ksm, T.ksm) : ""}`.trimEnd())
+    // 只报内存气球设备: 有它宿主才能在运行中回收内存, 是超开常用的手段, 但很多平台默认就挂着, 不算问题。
+    // 不报 KSM: 虚拟机里读到的是虚拟机自己的 KSM 开关, 反映不了宿主有没有合并内存。
+    put(L(T.overcommit), balloon
+      ? `${L(T.balloonOn)}${paint(zh ? "  宿主可在运行中回收内存" : "  host can reclaim RAM", "gray")}`
+      : paint(L(T.balloonOff), "gray"))
   }
   if (hw.bench.mem) {
     const [tool, r, w] = hw.bench.mem
     const mib = (v: string | undefined) => (num(v) !== null ? fmtKiB(num(v)! * 1024) : "-")
+    // 旧版脚本交的 dd 数值不是内存带宽, 不显示
     if (tool === "sysbench") put(L(T.memBench), `${L(T.read)} ${paint(mib(r), "bold")} · ${L(T.write)} ${paint(mib(w), "bold")}`)
-    else put(L(T.memBench), `${paint(num(r) !== null ? fmtKiB(num(r)! / 1024) : "-", "bold")}${paint(zh ? " (dd, 近似)" : " (dd, approx.)", "gray")}`)
   }
   out.push(hr())
 
   // —— 硬盘 ——
   title(T.disk)
   if (hw.disk) {
-    const [count, total, size, used, , dev, type] = hw.disk
+    const [count, total, size, used, avail, dev, type] = hw.disk
     const isVm = hw.virt !== null && hw.virt !== "none"
     const bits: string[] = []
     if (num(count)) bits.push(zh ? `${count} 块 · 共 ${fmtBytes(num(total)!)}` : `${count} disk(s) · ${fmtBytes(num(total)!)}`)
-    if (num(size)) bits.push(`${zh ? "测试分区" : "test fs"} ${fmtBytes(num(size)!)} ${L(T.used)} ${Math.round((num(used)! / num(size)!) * 100)}%`)
+    // 已用比例按 df 的算法: 已用 / (已用 + 可用), 保留给 root 的块不算, 和用户自己跑 df 看到的一致
+    const usedB = num(used)
+    const availB = num(avail)
+    const pct = usedB !== null && availB !== null && usedB + availB > 0 ? Math.ceil((usedB / (usedB + availB)) * 100) : null
+    if (num(size)) bits.push(`${zh ? "测试分区" : "test fs"} ${fmtBytes(num(size)!)}${pct !== null ? ` ${L(T.used)} ${pct}%` : ""}`)
     put(L(T.capacity), bits.join(" · "))
     // 虚拟磁盘的「是否机械盘」标志常常误报 (virtio 默认报 1), 只对物理机显示 SSD / HDD
     if (dev) put(L(T.device), `${dev}${!isVm && type ? ` · ${type.toUpperCase()}` : ""}`)

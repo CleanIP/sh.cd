@@ -4,7 +4,7 @@
 import { pad, W, width, type Pair, type Renderer, type Tone } from "./base"
 import { PROVINCES, ROUTE_CITIES } from "./local"
 import { classifyRoute, hopAsn, type Carrier, type RouteHop } from "./route"
-import { fit, fmtMbps, median, num, rowsFlex, rtrim, spark, str, textParts, wrap } from "./util"
+import { fit, fmtMbps, median, num, rowsFlex, rtrim, rttSamples, spark, str, textParts, wrap } from "./util"
 
 const CARRIERS = ["ct", "cu", "cm"] as const
 
@@ -188,8 +188,8 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   if (net.nat || net.tcp || net.v6 !== null) {
     title(T.local)
     if (net.nat) {
-      if (net.nat.kind === "open") put(L(T.nat), `${badge(L(T.open), "good")}  ${paint(net.nat.ip, "gray")}`)
-      else if (net.nat.kind === "nat") put(L(T.nat), `${badge(L(T.natted), "warn")}  ${paint(`${L(T.exitIp)} ${net.nat.ip}`, "gray")}`)
+      if (net.nat.kind === "open") put(L(T.nat), `${badge(L(T.open), "good")}  ${paint(R.ip(net.nat.ip), "gray")}`)
+      else if (net.nat.kind === "nat") put(L(T.nat), `${badge(L(T.natted), "warn")}  ${paint(`${L(T.exitIp)} ${R.ip(net.nat.ip)}`, "gray")}`)
       else put(L(T.nat), paint(L(T.natFail), "gray"))
     }
     if (net.tcp) {
@@ -210,7 +210,7 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     if (reg.length) put(L(T.registry), reg.join(" · "))
     if (bgp.address) wrap(bgp.address, VW).slice(0, 2).forEach((l, i) => put(i ? "" : L(T.address), paint(l, "gray")))
     const rpki = bgp.rpki === "valid" ? tonePaint(L(T.rpkiValid), "good") : bgp.rpki === "invalid" ? tonePaint(L(T.rpkiInvalid), "bad") : bgp.rpki ? paint(L(T.rpkiUnknown), "gray") : ""
-    const routeBits = [bgp.route, bgp.range && bgp.range !== bgp.route ? `${L(T.allocated)} ${bgp.range}` : "", rpki].filter(Boolean)
+    const routeBits = [bgp.route ? R.ip(bgp.route) : "", bgp.range && bgp.range !== bgp.route ? `${L(T.allocated)} ${R.ip(bgp.range)}` : "", rpki].filter(Boolean)
     if (routeBits.length) put(L(T.route), routeBits.join(" · "))
     const peer: string[] = []
     if (bgp.counts) {
@@ -251,14 +251,15 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
       const value = rtrim(CARRIERS.map((c) => {
         const cell = cells.find((x) => x.carrier === c)
         if (!cell) return pad("-", COL)
-        const ok = cell.samples.filter((s): s is number => s !== null)
+        const samples = rttSamples(cell.samples)
+        const ok = samples.filter((s): s is number => s !== null)
         const m = median(ok)
         if (m === null) return tonePaint(pad(zh ? "×××××  超时" : "×××××  timeout", COL), "bad")
         medians[c]!.push(m)
         const lo = Math.min(...ok)
-        const lost = cell.samples.length - ok.length
+        const lost = samples.length - ok.length
         const tone: Tone = lost ? "warn" : latencyTone(m)
-        return paint(spark(cell.samples, lo, Math.max(Math.max(...ok), lo + 20)), "gray") + " " + tonePaint(padL(String(Math.round(m)), 4), tone) + " ".repeat(COL - 10)
+        return paint(spark(samples, lo, Math.max(Math.max(...ok), lo + 20)), "gray") + " " + tonePaint(padL(String(Math.round(m)), 4), tone) + " ".repeat(COL - 10)
       }).join(""))
       out.push(`  ${pad(fit(zh ? pzh : pen, LABEL - 1), LABEL)}${value}`)
     }
@@ -301,9 +302,16 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     const cell = (v: number | "stall" | null) => v === null
       ? tonePaint(pad(L(T.speedFail), COL), "bad")
       : v === "stall" ? paint(pad(L(T.speedStall), COL), "gray") : pad(fmtMbps(v), COL)
+    // 一个方向不到另一个方向的十分之一, 基本是节点对该方向限速 (香港移动上传常见), 这个数不代表本机带宽, 标灰加说明
+    let throttled = false
     for (const s of net.speed) {
-      out.push(`  ${pad(fit(speedLabel(s, lang), LABEL - 2), LABEL)}${rtrim(cell(s.down) + cell(s.up))}`)
+      const lowDir = typeof s.down === "number" && typeof s.up === "number" && Math.max(s.down, s.up) >= 50 && Math.min(s.down, s.up) < Math.max(s.down, s.up) / 10
+        ? (s.down < s.up ? "down" : "up") : null
+      if (lowDir) throttled = true
+      const c = (v: number | "stall" | null, dir: "down" | "up") => (lowDir === dir ? paint(pad(fmtMbps(v as number), COL), "gray") : cell(v))
+      out.push(`  ${pad(fit(speedLabel(s, lang), LABEL - 2), LABEL)}${rtrim(c(s.down, "down") + c(s.up, "up"))}`)
     }
+    if (throttled) out.push(`  ${paint(zh ? "灰色数值: 节点单向限速, 不代表本机带宽" : "Gray: throttled by the test server, not this machine", "gray")}`)
     // 没有节点的运营商如实写出来, 不拿别的节点冒充
     const missing = CARRIERS.filter((c) => !net.speed.some((s) => s.carrier === c))
     if (missing.length) out.push(`  ${pad(missing.map((c) => L(T[c])).join(" · "), LABEL)}${paint(L(T.noNode), "gray")}`)
@@ -356,7 +364,7 @@ export function renderRouteDetail(R: Renderer, net: NetData, hops: Record<string
         const where = PRIVATE.test(h.ip) ? L(T.private) : info?.place ?? ""
         const ms = h.ms !== undefined ? padL(`${h.ms} ms`, 7) : padL("", 7)
         const tail = fit([asn, name, where].filter(Boolean).join(" · "), W - 2 - 3 - 16 - 7 - 2)
-        out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${pad(h.ip, 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`)
+        out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${pad(R.ip(h.ip), 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`)
       }
       out.push("")
     }

@@ -30,6 +30,7 @@ JSON=0
 OPT_NOCOLOR=0
 DEEP=0
 AUTO_YES=0
+FULL=0
 STAGES=""
 SKIP=","
 
@@ -46,8 +47,9 @@ Run without options in a terminal to open the menu.
   -H            Hardware & performance
   -I            IP quality
   -N            Network quality
-  -A            Everything (same as menu option 1)
-  -d            Deep mode: ATTO disk table, hop-by-hop routes
+  -A            Full check-up: hardware → IP → network (menu option 1)
+  -A -d         All checks: full check-up + deep mode + hop-by-hop routes (menu option 2)
+  -d            Deep mode: ATTO disk table, latency per route hop
   -y            Install sysbench / fio without asking when missing
 
   -4 / -6       IPv4 or IPv6 only (IP quality)
@@ -71,8 +73,9 @@ sh.cd v$VERSION — CleanIP 服务器全面体检: 硬件与性能 · IP 质量 
   -H            硬件与性能
   -I            IP 质量
   -N            网络质量
-  -A            一键全检 (同菜单第 1 项, 跳过菜单)
-  -d            深度模式: 硬件 ATTO 块大小表、逐跳回程路由
+  -A            一键全检: 硬件 → IP → 网络 (同菜单第 1 项)
+  -A -d         全部检测: 一键全检 + 深度模式 + 回程路由详情 (同菜单第 2 项)
+  -d            深度模式: 硬盘 ATTO 块大小表、回程每一跳的延迟
   -y            缺少 sysbench / fio 时直接安装, 不询问
 
   -4 / -6       只检测 IPv4 或 IPv6 (IP 质量)
@@ -100,7 +103,7 @@ while getopts ":HINAdy46x:i:asS:jnl:Ehv" opt; do
 	H) add_stage hw ;;
 	I) add_stage ip ;;
 	N) add_stage net ;;
-	A) add_stage hw; add_stage ip; add_stage net ;;
+	A) add_stage hw; add_stage ip; add_stage net; FULL=1 ;;
 	d) DEEP=1 ;;
 	y) AUTO_YES=1 ;;
 	4) ONLY_FAMILY=4 ;;
@@ -121,6 +124,9 @@ while getopts ":HINAdy46x:i:asS:jnl:Ehv" opt; do
 done
 
 skipped() { case "$SKIP" in *",$1,"*) return 0 ;; esac; return 1; }
+
+# -A -d = 全部检测: 一键全检 + 深度模式 + 回程路由详情 (同菜单第 2 项)
+[ "$FULL" = 1 ] && [ "$DEEP" = 1 ] && add_stage route
 
 if ! command -v curl >/dev/null 2>&1; then
 	printf '%s\n' "$(t "需要 curl, 请先安装: apt install -y curl 或 yum install -y curl" "curl is required: apt install -y curl or yum install -y curl")" >&2
@@ -334,7 +340,8 @@ hw_collect_cpu() {
 	[ -z "$mhz" ] && mhz=$(grep -m1 'cpu MHz' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | tr -d ' ')
 	[ -z "$mhz" ] && mhz=$(lv 'CPU max MHz')
 	put "$d" hw_cpu "$(clean "$model")|$cores|$threads|${sockets:-1}|${mhz%%.*}|$(cpu_usage)"
-	put "$d" hw_cache "$(clean "$(lv 'L1d cache' | cut -d'(' -f1)")|$(clean "$(lv 'L1i cache' | cut -d'(' -f1)")|$(clean "$(lv 'L2 cache' | cut -d'(' -f1)")|$(clean "$(lv 'L3 cache' | cut -d'(' -f1)")"
+	# 新版 lscpu 给的是所有实例的合计, 例 "512 KiB (16 instances)"; 原样交上去, 报告里换算成每个实例
+	put "$d" hw_cache "$(clean "$(lv 'L1d cache')")|$(clean "$(lv 'L1i cache')")|$(clean "$(lv 'L2 cache')")|$(clean "$(lv 'L3 cache')")"
 	fl=" $(grep -m1 -E '^(flags|Features)' /proc/cpuinfo 2>/dev/null | cut -d: -f2) $(sysctl -n machdep.cpu.features machdep.cpu.leaf7_features 2>/dev/null | tr 'A-Z.' 'a-z_' | tr '\n' ' ') "
 	# Apple 芯片: sysctl hw.optional.arm.FEAT_* 为 1 表示支持
 	[ "$(sysctl -n hw.optional.arm.FEAT_AES 2>/dev/null)" = 1 ] && fl="$fl aes "
@@ -468,10 +475,8 @@ hw_bench() {
 		r=$(sysbench memory --memory-block-size=1M --memory-total-size=1000G --memory-oper=read --time=3 run 2>/dev/null | grep -oE '[0-9.]+ MiB/sec' | cut -d' ' -f1)
 		w=$(sysbench memory --memory-block-size=1M --memory-total-size=1000G --memory-oper=write --time=3 run 2>/dev/null | grep -oE '[0-9.]+ MiB/sec' | cut -d' ' -f1)
 		put "$d" bn_mem "sysbench|${r:-fail}|${w:-fail}"
-	elif [ "$IS_LINUX" = 1 ]; then
-		r=$(dd if=/dev/zero of=/dev/null bs=1M count=8192 2>&1 | dd_rate)
-		put "$d" bn_mem "dd|${r:-fail}|"
 	fi
+	# 没有 sysbench 时不测内存: dd 读 /dev/zero 写 /dev/null 测的是系统调用开销, 不是内存带宽 (香港单核机测出 30 GB/s)
 
 	[ -n "$BENCH_DIR" ] || return 0
 	BENCH_FILE="$BENCH_DIR/.shcd-fio"
@@ -521,7 +526,7 @@ stage_hw() {
 # 二、IP 质量
 # ════════════════════════════════════════════════════════════════════════
 # ── 流媒体 / AI 解锁 ─────────────────────────────────────────────────────
-# 值: yes | no | originals (Netflix 仅自制剧) | web (ChatGPT 仅网页版) | fail (请求失败或无法判断)
+# 值: yes | no | originals (Netflix 仅自制剧) | web (ChatGPT 仅网页版) | nov6 (检测 IPv6 出口, 但该网站不支持 IPv6) | fail (请求失败或无法判断)
 # 地区附在竖线后, 例: yes|US
 # 判定依据 2026-09-15 在洛杉矶 (全部可用)、英国与香港 (ChatGPT / Claude / Gemini / TikTok 不可用) 实测过。
 
@@ -545,7 +550,8 @@ probe_youtube() {
 	web -o "$d/yt" -b 'CONSENT=YES+cb' https://www.youtube.com/premium >/dev/null 2>&1
 	region=$(grep -oE '"contentRegion":"[A-Z]{2}"' "$d/yt" 2>/dev/null | head -n1 | cut -d'"' -f4)
 	if grep -q 'www.google.cn' "$d/yt" 2>/dev/null; then echo "no|CN"
-	elif grep -q 'Premium is not available in your country' "$d/yt" 2>/dev/null; then echo "no|$region"
+	# 不支持的国家页面里的 contentRegion 会回落成 US, 地区不能用
+	elif grep -q 'Premium is not available in your country' "$d/yt" 2>/dev/null; then echo "no|"
 	elif grep -q 'ad-free' "$d/yt" 2>/dev/null; then echo "yes|$region"
 	else echo "fail"; fi
 }
@@ -555,7 +561,11 @@ probe_tiktok() {
 	out=$(web -o "$d/tt" -w '%{http_code} %{url_effective}' https://www.tiktok.com/explore) || out=000
 	region=$(grep -oE '"region":"[A-Z]+"' "$d/tt" 2>/dev/null | head -n1 | cut -d'"' -f4)
 	case "$out" in
-	000*) echo "fail" ;;
+	000*)
+		# 连不上 TikTok 但能连上别的网站: 当地网络封锁, 算不可用 (2026-09-17 乌兹别克斯坦家宽实测 TCP 超时);
+		# 对照站点也连不上才是本机网络问题, 记检测失败
+		if ccurl -s -m 6 -o /dev/null https://www.google.com/generate_204 2>/dev/null; then echo "no|"; else echo "fail"; fi
+		;;
 	# 不可用地区会被跳到 /xx/about 介绍页, region 也不再是两位国家码 (香港实测为 ALISG)
 	*/about*) echo "no|" ;;
 	*) if [ ${#region} = 2 ]; then echo "yes|$region"; else echo "fail"; fi ;;
@@ -665,10 +675,20 @@ probe_reddit() {
 	esac
 }
 
+# 各服务检测时访问的主域名, 检测 IPv6 出口时先看它有没有 IPv6 地址
+MEDIA_HOSTS="netflix:www.netflix.com disney:disney.api.edge.bamgrid.com youtube:www.youtube.com tiktok:www.tiktok.com prime:www.primevideo.com reddit:www.reddit.com chatgpt:api.openai.com claude:claude.ai gemini:gemini.google.com"
+
 run_media() {
-	local d="$1" name
-	for name in netflix disney youtube tiktok prime reddit chatgpt claude gemini; do
+	local d="$1" fam="$2" item name host
+	for item in $MEDIA_HOSTS; do
+		name=${item%%:*}
+		host=${item#*:}
 		mkdir -p "$d/m_$name"
+		# 网站本身没有 IPv6 (TikTok / Prime Video / Reddit, 2026-09-17 核实) 时 IPv6 出口必然连不上, 记 nov6 而不是检测失败
+		if [ "$fam" = 6 ] && command -v getent >/dev/null 2>&1 && [ -z "$(getent ahostsv6 "$host" 2>/dev/null | grep -v '::ffff:')" ]; then
+			put "$d/m_$name" "media_$name" nov6
+			continue
+		fi
 		(put "$d/m_$name" "media_$name" "$("probe_$name" "$d/m_$name")") &
 	done
 	wait
@@ -677,11 +697,14 @@ run_media() {
 # 用 bash 的 /dev/tcp 读 SMTP 欢迎语 (220 开头); 自己计时杀进程, 因为 macOS 没有 timeout 命令。
 # /dev/tcp 走系统默认出口, 无法绑定网卡也不能走代理, 所以 -x / -i 模式下跳过。
 
+# 输出 ok (220 欢迎语) | reject (连上了但回 4xx/5xx, 多为对方按 IP 信誉拒收) | fail (连不上或 10 秒内没有欢迎语)
 smtp_banner() {
 	local host="$1" out="$2" i=0 pid
+	rm -f "$out"
 	(exec 3<>"/dev/tcp/$host/25" && IFS= read -r line <&3 && printf '%s' "$line" >"$out") 2>/dev/null &
 	pid=$!
-	while kill -0 "$pid" 2>/dev/null && [ $i -lt 60 ]; do
+	# 欢迎语慢的邮局要好几秒 (新浪实测 2.9 秒), 12 家并发时更慢, 等 10 秒
+	while kill -0 "$pid" 2>/dev/null && [ $i -lt 100 ]; do
 		sleep 0.1
 		i=$((i + 1))
 	done
@@ -689,8 +712,11 @@ smtp_banner() {
 	# 25 端口被静默丢包时 connect 会挂两分钟以上 (2026-09-15 香港机实测整个脚本卡死)
 	kill -9 "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
-	case "$(cat "$out" 2>/dev/null)" in 220*) return 0 ;; esac
-	return 1
+	case "$(cat "$out" 2>/dev/null)" in
+	220*) echo ok ;;
+	[45][0-9][0-9]*) echo reject ;;
+	*) echo fail ;;
+	esac
 }
 
 MAIL_HOSTS="gmail:gmail-smtp-in.l.google.com outlook:outlook-com.olc.protection.outlook.com yahoo:mta5.am0.yahoodns.net icloud:mx01.mail.icloud.com qq:mx1.qq.com 163:163mx01.mxmail.netease.com mailru:mxs.mail.ru aol:mx-aol.mail.gm0.yahoodns.net gmx:mx00.gmx.net mailcom:mx00.mail.com sohu:sohumx.h.a.sohu.com sina:freemx1.sinamail.sina.com.cn"
@@ -700,11 +726,14 @@ run_mail() {
 	mkdir -p "$d/mail"
 	for item in $MAIL_HOSTS; do
 		(
-			if smtp_banner "${item#*:}" "$d/mail/banner_${item%%:*}"; then
-				put "$d/mail" "mail_${item%%:*}" ok
-			else
-				put "$d/mail" "mail_${item%%:*}" fail
+			# 2>/dev/null: macOS 的 bash 3.2 在强杀超时连接后会往 stderr 打 "Killed: 9" 作业通知
+			r=$(smtp_banner "${item#*:}" "$d/mail/banner_${item%%:*}" 2>/dev/null)
+			# 连不上的再试一次: 同一出口并发连十几家时, 个别邮局会慢一拍 (2026-09-17 洛杉矶 Yahoo 并发时超时, 单独连 0.2 秒)
+			if [ "$r" = fail ]; then
+				sleep 1
+				r=$(smtp_banner "${item#*:}" "$d/mail/banner_${item%%:*}" 2>/dev/null)
 			fi
+			put "$d/mail" "mail_${item%%:*}" "$r"
 		) &
 	done
 	wait
@@ -758,7 +787,7 @@ stage_ip_exit() {
 	if ! skipped dns && [ "$seq" = 1 ]; then run_dns "$d" & fi
 	if ! skipped media; then
 		progress "$(t "[IP $label] 检测流媒体与 AI 解锁…" "[IP $label] Checking streaming & AI…")"
-		run_media "$d"
+		run_media "$d" "$fam"
 	fi
 	if ! skipped mail && [ "$ex" = 4 ] && [ -z "$PROXY" ] && [ -z "$IFACE" ]; then
 		progress "$(t "[IP $label] 检测邮件端口…" "[IP $label] Checking mail ports…")"
@@ -1132,11 +1161,16 @@ stage_route() {
 	local d="$TMP/route"
 	mkdir -p "$d"
 	: >"$d/fields"
-	set_net 4
-	progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
-	DEEP=1
-	run_route "$d"
-	cat "$d"/*/fields >>"$d/fields" 2>/dev/null
+	if [ "$DEEP" = 1 ] && [ -s "$TMP/net/route/fields" ]; then
+		# 全部检测: 网络阶段已按深度模式追踪过回程 (带每跳延迟), 直接复用, 不再追踪一遍
+		cat "$TMP/net/route/fields" >>"$d/fields"
+	else
+		set_net 4
+		progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
+		DEEP=1
+		run_route "$d"
+		cat "$d"/*/fields >>"$d/fields" 2>/dev/null
+	fi
 	put "$d" deep 1
 	progress_done
 }
@@ -1180,25 +1214,31 @@ menu_select() {
 	local choice
 	if [ "$LANG_OPT" = en ]; then
 		printf '  %s%s1%s  Full check-up    hardware → IP → network   %sabout 6 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  Hardware         CPU memory disk scores    %sabout 2 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s3%s  IP quality       purity unlocks blacklists %sabout 30 s%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s4%s  Network          BGP latency routes speed  %sabout 3 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s5%s  Route details    location & ASN per hop    %sabout 1 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  All checks       full + deep + hop routes  %sabout 8 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s3%s  Hardware         CPU memory disk scores    %sabout 2 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s4%s  IP quality       purity unlocks blacklists %sabout 30 s%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s5%s  Network          BGP latency routes speed  %sabout 3 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s6%s  Route details    location & ASN per hop    %sabout 1 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s0  Exit%s\n\n  Choose [1]: ' "$C_K" "$C_0"
 	else
 		printf '  %s%s1%s  一键全检      硬件 → IP → 网络      %s约 6 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  硬件与性能    系统 CPU 内存 硬盘    %s约 2 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s3%s  IP 质量       纯净度 解锁 黑名单    %s约 30 秒%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s4%s  网络质量      BGP 延迟 回程 测速    %s约 3 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s5%s  回程路由详情  逐跳位置与 ASN        %s约 1 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  全部检测      含深度模式与逐跳路由  %s约 8 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s3%s  硬件与性能    系统 CPU 内存 硬盘    %s约 2 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s4%s  IP 质量       纯净度 解锁 黑名单    %s约 30 秒%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s5%s  网络质量      BGP 延迟 回程 测速    %s约 3 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s6%s  回程路由详情  逐跳位置与 ASN        %s约 1 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s0  退出%s\n\n  请选择 [1]: ' "$C_K" "$C_0"
 	fi
 	read -r choice </dev/tty || choice=1
 	case "$choice" in
-	2) STAGES=" hw" ;;
-	3) STAGES=" ip" ;;
-	4) STAGES=" net" ;;
-	5) STAGES=" route" ;;
+	2)
+		STAGES=" hw ip net route"
+		DEEP=1
+		;;
+	3) STAGES=" hw" ;;
+	4) STAGES=" ip" ;;
+	5) STAGES=" net" ;;
+	6) STAGES=" route" ;;
 	0 | q | Q) exit 0 ;;
 	*) STAGES=" hw ip net" ;;
 	esac
@@ -1298,7 +1338,12 @@ while [ $# -gt 0 ]; do
 			"stage_$stage"
 			put "$TMP/$stage" dur $(($(date +%s) - start))
 			if post_report "$stage" "$TMP/$stage/fields" "$TMP/$stage/report" 4; then
-				cat "$TMP/$stage/fields" >>"$ALL"
+				# 回程详情和网络质量的逐跳字段同名, 两段都跑时总览只收一份 (同名字段会被解析成数组), 用时照加
+				if [ "$stage" = route ] && grep -q '^rt_' "$ALL"; then
+					grep '^dur=' "$TMP/$stage/fields" >>"$ALL"
+				else
+					cat "$TMP/$stage/fields" >>"$ALL"
+				fi
 				JSON_PARTS="$JSON_PARTS,\"$([ "$stage" = net ] && echo network || echo routes)\":$(cat "$TMP/$stage/report")"
 				DONE_STAGES=$((DONE_STAGES + 1))
 			fi

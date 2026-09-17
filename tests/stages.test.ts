@@ -107,7 +107,7 @@ describe("硬件与性能", () => {
     const text = renderHw(createRenderer("zh", false), hw).join("\n");
     expect(text).toContain("[KVM 虚拟机]");
     expect(text).toContain("单线程 1004 · 多线程 15450");
-    expect(text).toContain("! 气球回收");
+    expect(text).toMatch(/内存气球\s+已启用/);
     // 虚拟机不显示磁盘类型 (virtio 的机械盘标志不可信)
     expect(text).not.toContain("HDD");
     expect(text).toMatch(/4K 随机 Q1\s+8\.2 MB\/s\s+2\.1K\s+41\.4 MB\/s/);
@@ -176,4 +176,31 @@ test("总览", () => {
   expect(text).toContain("解锁 1/2");
   expect(text).toContain("电信 CN2 GIA");
   expect(classifyRoute("ct", [{ ttl: 4, ip: "59.43.1.1" }]).code).toBe("ct_cn2");
+});
+
+test("缓存按实例换算, 已用比例与 df 一致", async () => {
+  const { cachePerInstance } = await import("../server/render/hw");
+  expect(cachePerInstance("512 KiB (16 instances)")).toBe("32 KiB");
+  expect(cachePerInstance("256 MiB (16 instances)")).toBe("16 MiB");
+  expect(cachePerInstance("1.5 MiB (2 instances)")).toBe("768 KiB");
+  expect(cachePerInstance("32K")).toBe("32K");
+  // 已用 5.95G / (5.95G + 13.6G) = 30.5% → 31%, 与 df 显示一致
+  const hw = parseHw({ hw_disk: "2|128849018880|20922114048|6097678336|13922837504|vda1|hdd", hw_virt: "kvm" })!;
+  expect(renderHw(createRenderer("zh", false), hw).join("\n")).toContain("已用 31%");
+});
+
+test("延迟: SYN 重传的样本算丢包, 不拉高中位数", async () => {
+  const { rttSamples } = await import("../server/render/util");
+  expect(rttSamples([189, 1199, 1193, null, 196])).toEqual([189, null, null, null, 196]);
+  const net = parseNet({ lat_bj_ct: "189,1199,1193,0,196" })!;
+  expect(renderNet(createRenderer("zh", false), net, null).join("\n")).toMatch(/北京\s+\S{5}\s+193/);
+});
+
+test("总览带宽: 就近节点单向受限时改取境外节点", () => {
+  const net = parseNet({
+    sp_1: "near|Hsinchu|45.4|1150.0", sp_2: "ct|js|230.0|stall", sp_3: "intl|hk|1400.0|4120.0", sp_4: "intl|sgp|3290.0|3670.0",
+  })!;
+  const text = renderSummary(createRenderer("zh", false), { hw: null, ip: null, local: null, net, took: 1 }).join("\n");
+  expect(text).toContain("带宽 3.29 Gbps / 3.67 Gbps");
+  expect(renderNet(createRenderer("zh", false), net, null).join("\n")).toContain("灰色数值");
 });

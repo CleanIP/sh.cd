@@ -1,12 +1,12 @@
 // sh.cd 检测脚本跑完两项以上时的「体检总览」: 每一项压成两行结论, 适合截图。
 // 数据来自脚本最后一次提交的全部字段 (硬件 + IP + 网络) 与该 IP 的查询结果。
 
-import { pad, W, width, type IpReport, type Pair, type Renderer } from "./base"
+import { ipTypeText, pad, W, width, type IpReport, type Pair, type Renderer } from "./base"
 import type { HwData } from "./hw"
 import type { IpcheckLocal } from "./local"
 import type { NetData } from "./net"
 import { classifyRoute } from "./route"
-import { fit, fmtBytes, fmtKiB, fmtMbps, median, num } from "./util"
+import { fit, fmtBytes, fmtKiB, fmtMbps, median, num, rttSamples } from "./util"
 
 const T = {
   title: ["体检总览", "Summary"],
@@ -32,7 +32,7 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
 
   const took = parts.took >= 60 ? (zh ? `${Math.floor(parts.took / 60)} 分 ${parts.took % 60} 秒` : `${Math.floor(parts.took / 60)}m ${parts.took % 60}s`) : zh ? `${parts.took} 秒` : `${parts.took}s`
   const head = L(T.title)
-  const right = `${parts.ip?.ip ?? ""}${parts.ip?.ip ? " · " : ""}${L(T.took)} ${took}`
+  const right = `${parts.ip?.ip ? `${R.ip(parts.ip.ip)} · ` : ""}${L(T.took)} ${took}`
   out.push(`  ${paint(head, "bold")}${" ".repeat(Math.max(2, W - 2 - width(head) - width(right)))}${paint(right, "gray")}`)
   out.push(paint(`  ${"─".repeat(W - 2)}`, "gray"))
 
@@ -59,23 +59,30 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
     const pur = ip.purity || {}
     const risk = ip.risk || {}
     const a: string[] = []
-    if (typeof pur.score === "number") {
-      const tone = pur.score >= 85 ? "good" : pur.score >= 50 ? "warn" : "bad"
-      a.push(`${badge(`${pur.score}${pur.grade ? ` ${pur.grade}` : ""}`, tone)} ${zh ? "纯净度" : "purity"}`)
+    const tone = (score: number) => (score >= 85 ? "good" : score >= 50 ? "warn" : "bad")
+    // 主分用综合评分, 和 cleanip.io 网页上的大数字一致; 纯净度并列 (两者口径不同, 综合评分会因恶意情报封顶)
+    const env = (ip as { ip_environment?: { score?: number, grade?: string } }).ip_environment
+    if (typeof env?.score === "number") {
+      a.push(`${badge(`${env.score}${env.grade ? ` ${env.grade}` : ""}`, tone(env.score))} ${zh ? "综合" : "overall"}`)
+      if (typeof pur.score === "number") a.push(`${zh ? "纯净度" : "purity"} ${pur.score}${pur.grade ? ` ${pur.grade}` : ""}`)
+    } else if (typeof pur.score === "number") {
+      a.push(`${badge(`${pur.score}${pur.grade ? ` ${pur.grade}` : ""}`, tone(pur.score))} ${zh ? "纯净度" : "purity"}`)
     }
-    if (pur.ip_type) a.push(String(pur.ip_type) === "IDC" ? (zh ? "机房" : "datacenter") : String(pur.ip_type))
+    // 总览里去掉 " IP" 后缀省列宽: 机房 / 住宅 / 移动 …
+    if (pur.ip_type) a.push(ipTypeText(String(pur.ip_type), lang).replace(/ IP$/, ""))
     if (pur.native_label) a.push(String(pur.native_label).startsWith("Native") ? (zh ? "原生" : "native") : (zh ? "广播" : "broadcast"))
-    if (typeof risk.risk_score === "number") a.push(`${zh ? "风险" : "risk"} ${risk.risk_score}`)
     line(L(T.ip), a.join(" · "))
     const b: string[] = []
-    const media = parts.local ? Object.values(parts.local.media) : []
+    if (typeof risk.risk_score === "number") b.push(`${zh ? "风险" : "risk"} ${risk.risk_score}`)
+    // 网站不支持 IPv6 的不算进分母
+    const media = parts.local ? Object.values(parts.local.media).filter((m) => m.status !== "nov6") : []
     if (media.length) {
       const ok = media.filter((m) => m.status === "yes" || m.status === "originals" || m.status === "web").length
       b.push(`${zh ? "解锁" : "unlocks"} ${tonePaint(`${ok}/${media.length}`, ok === media.length ? "good" : "warn")}`)
     }
     if (parts.local?.mail) {
-      const vals = Object.values(parts.local.mail)
-      b.push(`${zh ? "邮局" : "mail"} ${vals.filter(Boolean).length}/${vals.length}`)
+      const vals = Object.values(parts.local.mail).map((v) => v === "ok")
+      b.push(`${zh ? "邮箱" : "mail"} ${vals.filter(Boolean).length}/${vals.length}`)
     }
     if (risk.dnsbl_checked) {
       const n = Array.isArray(risk.dnsbl_listed) ? risk.dnsbl_listed.length : 0
@@ -100,15 +107,21 @@ export function renderSummary(R: Renderer, parts: { hw: HwData | null, ip: IpRep
     }
     if (a.length) line(L(T.net), a.join(" · "))
     const b: string[] = []
-    const meds = net.latency.map((x) => median(x.samples.filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
+    const meds = net.latency.map((x) => median(rttSamples(x.samples).filter((s): s is number => s !== null))).filter((m): m is number => m !== null)
     if (meds.length) b.push(`${zh ? "三网平均" : "China avg"} ${paint(`${Math.round(meds.reduce((s, m) => s + m, 0) / meds.length)} ms`, "bold")}`)
-    // 本机带宽看就近节点; 没测到就近节点时取国内节点里最高的
+    // 本机带宽: 就近节点上下行正常 (相差不到 5 倍) 就用它; 否则就近节点多半自己限速
+    // (2026-09-17 香港机排到新竹, 下载 45 Mbps、上传 1.15 Gbps), 改取境外节点里上下行较小值最大的一个。
+    // 国内节点从境外测普遍受限, 不参与。
     const isNum = (v: number | "stall" | null): v is number => typeof v === "number"
-    const near = net.speed.find((s) => s.carrier === "near" && isNum(s.down))
-    const best = near ?? net.speed.filter((s) => s.carrier !== "intl" && isNum(s.down)).sort((x, y) => (Number(y.down) || 0) - (Number(x.down) || 0))[0]
-    if (best && isNum(best.down)) b.push(`${zh ? "带宽" : "bandwidth"} ${paint(`${fmtMbps(best.down)} / ${isNum(best.up) ? fmtMbps(best.up) : "-"}`, "bold")}`)
+    const both = net.speed.filter((s): s is typeof s & { down: number, up: number } => isNum(s.down) && isNum(s.up))
+    const balanced = (s: { down: number, up: number }) => Math.min(s.down, s.up) * 5 >= Math.max(s.down, s.up)
+    const near = both.find((s) => s.carrier === "near" && balanced(s))
+    const best = near ?? both.filter((s) => s.carrier === "near" || s.carrier === "intl").sort((x, y) => Math.min(y.down, y.up) - Math.min(x.down, x.up))[0]
+    if (best) b.push(`${zh ? "带宽" : "bandwidth"} ${paint(`${fmtMbps(best.down)} / ${fmtMbps(best.up)}`, "bold")}`)
     if (b.length) line(a.length ? "" : L(T.net), b.join(" · "))
   }
-  out.push(paint(`  ${"─".repeat(W - 2)}`, "gray"))
+  // 底线带上入口命令: 截图分享出去, 别人照着就能跑
+  const cmd = "bash <(curl -Ls https://sh.cd)"
+  out.push(`  ${paint("─".repeat(W - 2 - width(cmd) - 1), "gray")} ${paint(cmd, "brand")}`)
   return out
 }

@@ -145,7 +145,11 @@ async function fetchPeering(asn: number): Promise<Peering> {
     try {
       const res = await getJson<{ data?: { names?: Record<string, string> } }>(`https://stat.ripe.net/data/as-names/data.json?resource=AS${u.asn}`, { timeout: 6000 })
       const raw = res?.data?.names?.[String(u.asn)]
-      if (raw) u.name = (raw.includes(" - ") ? raw.split(" - ").slice(1).join(" - ") : raw).replace(/, [A-Z]{2}$/, "")
+      // 常见两种写法: "HANDLE - Name, CC" 与 "HANDLE "Name" JSC, CC"; 去掉句柄、国家码与引号
+      if (raw) {
+        const body = raw.includes(" - ") ? raw.split(" - ").slice(1).join(" - ") : raw.replace(/^[A-Z0-9][A-Z0-9-]*\s+(?=\S)/, "")
+        u.name = body.replace(/, [A-Z]{2}$/, "").replace(/["']/g, "").trim() || raw
+      }
     } catch { /* 没有名称就只显示 AS 号 */ }
   }))
   bgpCache.set(asn, { at: Date.now(), v })

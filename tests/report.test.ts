@@ -36,7 +36,7 @@ describe("ipcheck 本机检测字段", () => {
     expect(local.media.netflix).toEqual({ status: "yes", region: "US" });
     expect(local.media.tiktok).toEqual({ status: "no", region: "" });
     expect(local.media.prime).toEqual({ status: "fail", region: "" });
-    expect(local.mail).toEqual({ gmail: true, outlook: false, qq: true });
+    expect(local.mail).toEqual({ gmail: "ok", outlook: "fail", qq: "ok" });
     expect(local.latency).toContainEqual({ province: "bj", carrier: "cu", ms: null, lost: 4 });
     expect(local.latency).toContainEqual({ province: "bj", carrier: "cm", ms: 1163.7, lost: 2 });
     expect(local.dnsUuid).toBe(SAMPLE.dns);
@@ -160,4 +160,15 @@ describe("三网回程线路判定", () => {
     expect(classifyRoute("cm", hops("223.120.10.1")).code).toBe("cm_cmi");
     expect(classifyRoute("cm", hops("221.183.1.1")).code).toBe("cm_cmnet");
   });
+});
+
+test("邮件: 拒收与连不上分开显示", () => {
+  const local = parseIpcheckFields({ mail_gmail: "ok", mail_gmx: "reject", mail_sina: "fail" });
+  expect(local.mail).toEqual({ gmail: "ok", gmx: "reject", sina: "fail" });
+  const text = renderLocalSections(createRenderer("zh", false), local, null).join("\n");
+  expect(text).toMatch(/GMX\s+!/);
+  expect(text).toContain("连上但被拒收");
+  // 只有拒收没有握手成功, 端口仍算放行
+  const onlyReject = renderLocalSections(createRenderer("zh", false), parseIpcheckFields({ mail_gmx: "reject" }), null).join("\n");
+  expect(onlyReject).toContain("[开放]");
 });

@@ -91,9 +91,15 @@ const IP_TYPES: Record<string, { text: Pair, tone: Tone }> = {
   "Tor IP": { text: ["Tor", "Tor"], tone: "bad" },
   "Unknown": { text: ["未知", "Unknown"], tone: "neutral" },
 }
-/** 同 utils/ipDisplay.ts normalizeIpType: hosting / datacenter 各种写法都归到 IDC。 */
+/** hosting / datacenter 各种写法都归到 IDC (与 cleanip.io 网页口径一致)。 */
 function normalizeIpType(t: string): string {
   return ["hosting", "hosting / idc", "hosting ip", "datacenter", "datacenter ip", "idc"].includes(t.trim().toLowerCase()) ? "IDC" : t
+}
+
+/** IP 类型的本地化名称, 认不出原样返回 */
+export function ipTypeText(raw: string, lang: Lang): string {
+  const t = IP_TYPES[normalizeIpType(raw)]
+  return t ? t.text[lang === "zh" ? 0 : 1] : raw
 }
 
 const NATIVE: Record<string, { text: Pair, tone: Tone }> = {
@@ -205,10 +211,43 @@ export interface Renderer {
   hr: (ch?: string) => string
   row: (label: string, value: string) => string
   labelW: number
+  /** 分享打码后的 IP / 网段 (见 ipMasker) */
+  ip: (s: string) => string
+  /** 分享打码后的反查主机名, 不宜显示时为 null */
+  host: (s: string) => string | null
 }
 
-export function createRenderer(lang: Lang, color: boolean): Renderer {
+/**
+ * 报告截图要能直接分享: 与检测的机器同一 /16 (IPv6 同前两组) 的地址与网段只留前两段, 例 203.0.*.* / 203.0.*.*\/24、
+ * 2001:db8:*; 其它地址 (骨干网跳点、公共 DNS) 原样显示。self 为空时不打码 (测试与离线排版用)。
+ */
+export function ipMasker(self: string | null | undefined): (s: string) => string {
+  const v4 = (s: string) => /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}(\/\d{1,2})?$/.exec(s)
+  const v6 = (s: string) => /^([0-9a-f]{1,4}):([0-9a-f]{1,4}):[0-9a-f:]*(\/\d{1,3})?$/i.exec(s)
+  const me4 = self ? v4(self) : null
+  const me6 = self ? v6(self) : null
+  return (s) => {
+    const m4 = v4(s)
+    if (m4) return me4 && m4[1] === me4[1] && m4[2] === me4[2] ? `${m4[1]}.${m4[2]}.*.*${m4[3] ?? ""}` : s
+    const m6 = v6(s)
+    if (m6) return me6 && m6[1]!.toLowerCase() === me6[1]!.toLowerCase() && m6[2]!.toLowerCase() === me6[2]!.toLowerCase() ? `${m6[1]}:${m6[2]}:*${m6[3] ?? ""}` : s
+    return s
+  }
+}
+
+/** 反查主机名打码: 常把 IP 编进第一段 (203-0-113-227.example.net), 只留后面的域名; 只有一段或本身是 IP 时不显示 */
+function hostMasker(self: string | null | undefined): (s: string) => string | null {
+  return (h) => {
+    if (!self) return h
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || (h.includes(":") && /^[0-9a-f:]+$/i.test(h))) return null
+    const labels = h.split(".").filter(Boolean)
+    return labels.length >= 3 ? `*.${labels.slice(1).join(".")}` : null
+  }
+}
+
+export function createRenderer(lang: Lang, color: boolean, self?: string | null): Renderer {
   const paint = painter(color)
+  const ip = ipMasker(self)
   // 英文标签比中文长 ("Native / Broadcast" 18 列), 标签列跟着放宽
   const labelW = lang === "zh" ? 16 : 20
   return {
@@ -221,6 +260,8 @@ export function createRenderer(lang: Lang, color: boolean): Renderer {
     hr: (ch = "─") => paint(ch.repeat(W), ch === "═" ? "brand" : "gray"),
     row: (label, value) => `  ${pad(label, labelW)}${value}`,
     labelW,
+    ip,
+    host: hostMasker(self),
   }
 }
 
@@ -283,8 +324,9 @@ export function renderIpSections(R: Renderer, r: IpReport & { ip: string }): str
   const score = typeof pur.score === "number" ? pur.score : null
 
   const out: string[] = []
-  out.push(row(text("ip"), paint(r.ip, "bold") + (r.ip_version ? paint(`  (IPv${r.ip_version})`, "gray") : "")))
-  if (r.hostname) out.push(row(text("rdns"), r.hostname))
+  out.push(row(text("ip"), paint(R.ip(r.ip), "bold") + (r.ip_version ? paint(`  (IPv${r.ip_version})`, "gray") : "")))
+  const host = r.hostname && r.hostname !== r.ip ? R.host(r.hostname) : null
+  if (host) out.push(row(text("rdns"), host))
   out.push(row(text("location"), loc))
   out.push(row(text("asn"), asn))
   if (net.asn_type) {
@@ -331,9 +373,4 @@ export function renderIpSections(R: Renderer, r: IpReport & { ip: string }): str
   if (known) out.push(row(text("known"), String(known)))
   out.push(hr())
   return out
-}
-
-/** 网站上该 IP 的完整报告链接 */
-export function fullReportUrl(lang: Lang, ip: string): string {
-  return `https://cleanip.io/${lang === "zh" ? "" : "en/"}${ip}`
 }

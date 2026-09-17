@@ -61,7 +61,8 @@ export function renderIpDetail(R: Renderer, r: FullReport): string[] {
     const local = typeof geo.local_time === "string" ? /T(\d{2}:\d{2})/.exec(geo.local_time)?.[1] : undefined
     put(L(T.tz), `${geo.timezone}${local ? paint(` · ${L(T.local)} ${local}`, "gray") : ""}`)
   }
-  const reg = [net.rir, net.rir_netname || net.assigned_netname, net.ip_range || net.route].filter(Boolean).join(" · ")
+  const range = net.ip_range || net.route
+  const reg = [net.rir, net.rir_netname || net.assigned_netname, range ? R.ip(String(range)) : ""].filter(Boolean).join(" · ")
   if (reg) put(L(T.registry), fit(reg, VW))
   const env = r.ip_environment
   if (env && typeof env.score === "number") {
