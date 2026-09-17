@@ -153,3 +153,17 @@ describe("市级延迟", () => {
     expect(text).toMatch(/×/);
   });
 });
+
+test("教育网线路能认出常见的国际转接方", () => {
+  const cases: Array<[hops: string, want: string]> = [
+    ["3:123.255.91.118,8:202.112.38.70", "HKIX"],       // 香港出去走 HKIX 直连教育网
+    ["4:4.69.208.58,7:180.87.168.114,16:202.206.232.234", "Tata"],
+    ["3:218.30.48.73,9:202.97.17.66,13:202.112.38.70", "163"],
+    ["3:223.120.201.69,10:223.120.3.86", "CMI"],
+  ];
+  for (const [hops, want] of cases) {
+    const net = parseNet({ rte_bj: hops })!;
+    const text = strip(renderNet(createRenderer("zh", false), net, null).join("\n"));
+    expect(text.split("\n").find((l) => l.startsWith("  北京"))).toContain(want);
+  }
+});
