@@ -79,3 +79,46 @@ describe("全省回程", () => {
     expect(detail).toContain("IPv6");
   });
 });
+
+// 教育网: 每省一所高校, IPv4 走 CERNET, IPv6 走 CERNET2
+describe("教育网回程", () => {
+  const eduFields: Record<string, string> = {};
+  PROVINCES.forEach(([p], i) => {
+    eduFields[`rte_${p}`] = i % 4 === 0
+      ? "3:223.120.201.69,5:223.120.161.5,9:101.4.117.1"   // 经 CMI 进教育网
+      : "3:218.30.48.73,6:202.97.94.1,9:101.4.114.5";      // 经 163
+    eduFields[`late_${p}`] = `${150 + i}.1,${152 + i}.2,0,${155 + i}.3,${151 + i}.4`;
+    eduFields[`rte6_${p}`] = "3/2001:470:1:1::1,6/2001:7fa:0:1::1,9/2001:da8:200::1";
+    eduFields[`late6_${p}`] = `${160 + i}.1,${162 + i}.2,${161 + i}.3,${163 + i}.4,${164 + i}.5`;
+  });
+  const net = parseNet(eduFields)!;
+
+  test("解析 31 省 × CERNET / CERNET2", () => {
+    expect(net.edu).toHaveLength(62);
+    expect(net.edu.filter((x) => x.v6)).toHaveLength(31);
+    expect(net.edu[0]!.samples).toHaveLength(5);
+  });
+
+  test("线路取进教育网前最后经过的骨干网 / 境外转接方", () => {
+    const text = strip(renderNet(createRenderer("zh", false), net, null).join("\n"));
+    expect(text).toContain("教育网回程");
+    expect(text).toMatch(/北京\s+CMIN2\s+\d+\s+20%\s+CMI\s+\d+/);
+    expect(text).toMatch(/天津\s+163\s+\d+/);
+  });
+
+  for (const lang of ["zh", "en"] as const) {
+    for (const color of [false, true]) {
+      test(`${lang} ${color ? "彩色" : "纯文本"} 不超过报告宽度`, () => {
+        assertWidth(renderNet(createRenderer(lang, color), net, null));
+        assertWidth(renderRouteDetail(createRenderer(lang, color), net, {}));
+      });
+    }
+  }
+
+  test("逐跳详情单独列出教育网", () => {
+    const detail = strip(renderRouteDetail(createRenderer("zh", false), net, {}).join("\n"));
+    expect(detail).toContain("CERNET · IPv4");
+    expect(detail).toContain("CERNET2 · IPv6");
+    expect(detail).toContain("北京 教育网回程");
+  });
+});

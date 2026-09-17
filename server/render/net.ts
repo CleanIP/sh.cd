@@ -3,7 +3,7 @@
 
 import { pad, W, width, type Pair, type Renderer, type Tone } from "./base"
 import { PROVINCES, ROUTE_CITIES } from "./local"
-import { classifyRoute, hopAsn, type Carrier, type RouteHop } from "./route"
+import { classifyEdu, classifyRoute, hopAsn, type Carrier, type RouteHop } from "./route"
 import { fit, fmtMbps, median, num, rowsFlex, rtrim, rttSamples, spark, str, textParts, wrap } from "./util"
 
 const CARRIERS = ["ct", "cu", "cm"] as const
@@ -46,6 +46,8 @@ export interface NetData {
   routes: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
   /** 大包回程 (-R): 同一批目标改发 1400 字节的包再扫一遍 */
   routesLarge: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
+  /** 教育网回程 (-R): 每省一所高校, v4 走 CERNET, v6 走 CERNET2 */
+  edu: Array<{ province: string, v6: boolean, hops: RouteHop[], samples: Array<number | null> | null }>
   routes6: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
   /** 分省测速: null = 该组节点都连不上 */
   speedCn: Array<{ province: string, carrier: Carrier, result: { city: string, down: number | "stall" | null, up: number | "stall" | null } | null }>
@@ -82,9 +84,9 @@ const IPV4 = String.raw`(?:\d{1,3}\.){3}\d{1,3}`
 
 export function parseNet(body: Record<string, unknown>): NetData | null {
   const keys = Object.keys(body)
-  if (!keys.some((k) => /^(nt_|lat6?_|rt6?_|sp_|spc_|il_)/.test(k))) return null
+  if (!keys.some((k) => /^(nt_|lat6?_|late6?_|rtl?6?_|rte6?_|sp_|spc_|il_)/.test(k))) return null
   const data: NetData = {
-    nat: null, tcp: null, v6: null, latency: [], latency6: [], routes: [], routesLarge: [], routes6: [], speed: [], speedCn: [], intl: [],
+    nat: null, tcp: null, v6: null, latency: [], latency6: [], routes: [], routesLarge: [], edu: [], routes6: [], speed: [], speedCn: [], intl: [],
     deep: body.deep === "1", dur: num(str(body.dur)),
   }
 
@@ -156,6 +158,27 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
     }
   }
 
+  for (const [prov] of PROVINCES) {
+    for (const [key, lat, v6, sep, re] of [
+      ["rte", "late", false, ":", new RegExp(`^\\d{1,2}:${IPV4}(:\\d{1,4})?$`)],
+      ["rte6", "late6", true, "/", /^\d{1,2}\/[0-9a-fA-F:]{2,39}(\/\d{1,4})?$/],
+    ] as const) {
+      const v = str(body[`${key}_${prov}`])
+      if (!v) continue
+      const parts = v.split(",")
+      const hops = v === "none" || parts.length > 60 || !parts.every((x) => re.test(x))
+        ? []
+        : parts.map((x) => {
+          const [ttl, ip, ms] = x.split(sep)
+          return { ttl: Number(ttl), ip: ip!, ...(ms ? { ms: Number(ms) } : {}) }
+        })
+      if (v !== "none" && !hops.length) continue
+      const lv = str(body[`${lat}_${prov}`])
+      const samples = /^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4}$/.test(lv) ? lv.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) : null
+      data.edu.push({ province: prov, v6, hops, samples })
+    }
+  }
+
   for (const place of INTL_ORDER) {
     const v = str(body[`il_${place}`])
     if (v === "fail") data.intl.push({ place, ms: null })
@@ -204,8 +227,11 @@ const T = {
   routesFull: ["全省回程线路", "Return routes by province"],
   routesLarge: ["大包回程", "Large-packet routes"],
   routeNote: ["线路 · 延迟 ms · 丢包", "line · latency ms · loss"],
+  edu: ["教育网回程", "CERNET return routes"],
+  eduNote: ["每省一所高校, 线路指进教育网前最后经过的骨干网", "One university per province; line = backbone before CERNET"],
   routeNoteLarge: ["1400 字节的包走的线路, 与上表不同说明大包绕路或被限速", "Path of 1400-byte packets; differs = detour or throttle"],
   routeNone: ["无回应", "No reply"],
+  routeUnknown: ["未识别", "unknown"],
   routeLegend: ["精品线路: CN2 GIA · CTGNET · 9929 · CMIN2", "Premium: CN2 GIA · CTGNET · 9929 · CMIN2"],
   speed: ["带宽测速", "Bandwidth"],
   down: ["下载", "Download"],
@@ -408,6 +434,33 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     out.push(`  ${paint(L(T.routeLegend), "gray")}`)
     out.push(hr())
   }
+  // —— 教育网回程 (CERNET / CERNET2) ——
+  if (net.edu.length) {
+    const LABEL = zh ? 8 : 12
+    const CELL = 15
+    out.push(`  ${paint(L(T.edu), "bold")}`, `  ${paint(L(T.eduNote), "gray")}`)
+    out.push(`  ${pad("", LABEL)}${paint(`${pad("CERNET", CELL)} ${pad("CERNET2", CELL)}`.trimEnd(), "gray")}`)
+    for (const [code, pzh, pen] of PROVINCES) {
+      const cells = net.edu.filter((x) => x.province === code)
+      if (!cells.length) continue
+      const value = rtrim([false, true].map((v6) => {
+        const r = cells.find((x) => x.v6 === v6)
+        if (!r) return pad("", CELL)
+        if (!r.hops.length) return paint(pad(L(T.routeNone), CELL), "gray")
+        const cls = classifyEdu(r.hops)
+        const s2 = r.samples ? rttSamples(r.samples) : null
+        const med = s2 ? median(s2.values.filter((x): x is number => x !== null)) : null
+        const loss = s2 ? Math.round((s2.lost / s2.values.length) * 100) : null
+        const name = pad(cls ? L(cls.label) : L(T.routeUnknown), 7)
+        return (cls ? name : paint(name, "gray"))
+          + paint(padL(med === null ? "" : String(Math.round(med)), 4), "gray")
+          + (loss ? tonePaint(padL(`${loss}%`, 4), loss > 20 ? "bad" : "warn") : paint(padL(loss === null ? "" : "0%", 4), "gray"))
+      }).join(" "))
+      out.push(`  ${pad(fit(zh ? pzh : pen, LABEL - 1), LABEL)}${value}`)
+    }
+    out.push(hr())
+  }
+
   // 目标超过三个城市 = 全省模式
   const full = new Set(net.routes.map((r) => r.city)).size > 3
   if (full) {
@@ -513,6 +566,42 @@ export function renderRouteDetail(R: Renderer, net: NetData, hops: Record<string
     [`IPv4 · ${L(T.routesLarge)}`, net.routesLarge],
     ["IPv6", net.routes6],
   ]
+  /** 一条线路的每一跳: IP、延迟、ASN 与位置 */
+  const hopLines = (list: RouteHop[]) => {
+    for (const h of list) {
+      const info = hops[h.ip]
+      const backbone = hopAsn(h.ip)
+      const asn = backbone ?? (info?.asn ? `AS${info.asn}` : "")
+      const name = backbone ? L(BACKBONE[backbone]!) : info?.org ? fit(info.org, 16) : ""
+      const where = PRIVATE.test(h.ip) || /^f[cd]|^fe80/i.test(h.ip) ? L(T.private) : info?.place ?? ""
+      const ms = h.ms !== undefined ? padL(`${h.ms} ms`, 7) : padL("", 7)
+      const tail = fit([asn, name, where].filter(Boolean).join(" · "), TAIL)
+      const shown = R.ip(h.ip)
+      if (width(shown) <= 16) {
+        out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${pad(shown, 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`)
+      } else {
+        // IPv6 地址放不进 16 列: 地址单独一行, 延迟与归属缩进到下一行
+        out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${fit(shown, W - 5)}`)
+        out.push(`     ${pad("", 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`.trimEnd())
+      }
+    }
+  }
+
+  // 教育网每省只有一条, 单独列在最后
+  const eduDetail = () => {
+    for (const v6 of [false, true]) {
+      const rows = net.edu.filter((x) => x.v6 === v6 && x.hops.length)
+      if (!rows.length) continue
+      out.push(`  ${paint(v6 ? "CERNET2 · IPv6" : "CERNET · IPv4", "bold")}`, "")
+      for (const r of rows) {
+        const p = PROVINCES.find(([c]) => c === r.province)
+        const cls = classifyEdu(r.hops)
+        out.push(`  ${paint(`${zh ? p?.[1] : p?.[2]} ${L(T.edu)}`, "bold")}  ${cls ? tonePaint(L(cls.label), "neutral", "bold") : paint(L(T.routeUnknown), "gray")}`)
+        hopLines(r.hops)
+        out.push("")
+      }
+    }
+  }
   for (const [family, routes] of families) {
     if (!routes.length) continue
     if (family !== "IPv4") out.push(`  ${paint(family, "bold")}`, "")
@@ -523,27 +612,12 @@ export function renderRouteDetail(R: Renderer, net: NetData, hops: Record<string
         const cls = r.hops.length ? classifyRoute(carrier, r.hops) : null
         const head = `${zh ? `${czh}${L(T[carrier])}` : `${L(T[carrier])} ${cen}`}`
         out.push(`  ${paint(head, "bold")}  ${cls ? (cls.code === "unknown" ? paint(L(cls.label), "gray") : tonePaint(L(cls.label), cls.tone, "bold")) : paint(L(T.routeNone), "gray")}`)
-        for (const h of r.hops) {
-          const info = hops[h.ip]
-          const backbone = hopAsn(h.ip)
-          const asn = backbone ?? (info?.asn ? `AS${info.asn}` : "")
-          const name = backbone ? L(BACKBONE[backbone]!) : info?.org ? fit(info.org, 16) : ""
-          const where = PRIVATE.test(h.ip) || /^f[cd]|^fe80/i.test(h.ip) ? L(T.private) : info?.place ?? ""
-          const ms = h.ms !== undefined ? padL(`${h.ms} ms`, 7) : padL("", 7)
-          const tail = fit([asn, name, where].filter(Boolean).join(" · "), TAIL)
-          const shown = R.ip(h.ip)
-          if (width(shown) <= 16) {
-            out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${pad(shown, 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`)
-          } else {
-            // IPv6 地址放不进 16 列: 地址单独一行, 延迟与归属缩进到下一行
-            out.push(`  ${paint(padL(String(h.ttl), 2), "gray")} ${fit(shown, W - 5)}`)
-            out.push(`     ${pad("", 16)}${paint(ms, "gray")}  ${backbone ? tonePaint(tail, "good") : tail}`.trimEnd())
-          }
-        }
+        hopLines(r.hops)
         out.push("")
       }
     }
   }
+  eduDetail()
   if (out.at(-1) === "") out.pop()
   out.push(hr())
   return out

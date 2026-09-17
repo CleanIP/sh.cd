@@ -15,7 +15,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.6.0"
+VERSION="1.6.1"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -1038,6 +1038,7 @@ stage_ip_exit() {
 #   il_<地点代码>=毫秒 或 fail
 #   spc_<省>_<ct|cu|cm>=城市|下载Mbps|上传Mbps 或 fail   分省测速 (-p)
 #   rt_<省>_<运营商>=TTL:IP[:毫秒],…  回程逐跳 (全省模式是 31 省 × 三网)   rtl_* 大包回程   rt6_* IPv6
+#   rte_<省> / rte6_<省>=教育网回程逐跳   late_<省> / late6_<省>=到教育网节点的握手毫秒
 
 # ── 本地网络策略: NAT 类型 (纯 bash 发 STUN 请求)、TCP 拥塞控制与缓冲区 ──
 # bash 的 UDP 连接每次换源端口, 无法用同一端口问两台 STUN 服务器, 所以只区分「公网直连」与「在 NAT 后」。
@@ -1333,6 +1334,73 @@ route_sweep() {
 		(hop_probe "$ttl" "$target" "$fam" "$size" >>"$out") &
 	done
 	wait
+}
+
+# ── 教育网回程 (随全省回程一起测): 每省一所高校官网, IPv4 走 CERNET (AS4538), IPv6 走 CERNET2 ──────
+# 2026-09-18 逐个解析并核对过 ASN 与所在省 (西藏用西藏农牧学院图书馆, 浙江用浙大 my 站; 各省高校主站
+# 不少挂在电信 / 联通或 CDN 上, 只留确认在教育网的)。地址写死: 同一域名在不同解析器上给的结果不一样。
+#   rte_<省>=TTL:IP,…  教育网 IPv4 回程    rte6_<省>=TTL/IP,…  CERNET2 IPv6 回程
+#   late_<省> / late6_<省>=毫秒,…  到该节点的 TCP 握手 (443 端口)
+EDU_NODES="
+bj|101.6.15.66|2402:f000:1:402:101:6:15:66
+tj|202.113.2.198|2001:da8:a000:ab23::10
+he|202.206.100.34|2001:250:800:1::34
+sx|202.207.240.104|2001:250:c01:5000:cacf:f068::
+nm|183.175.40.132|2001:da8:21d:c101::2
+ln|202.118.76.222|2001:da8:a800:7::222
+jl|202.198.16.83|2001:da8:b000::80
+hl|202.118.254.135|2001:da8:b800:253::c0a8:3208
+sh|202.120.2.114|2001:da8:8000:6181:202:120:2:114
+js|202.119.32.7|2001:da8:1007::9999
+zj|210.32.159.211|2001:da8:e000:8003::215
+ah|101.76.160.55|2001:250:5401:160::55
+fj|219.229.81.211|2001:da8:e800:251c::211
+jx|222.204.6.206|2001:250:6c00:60::4
+sd|202.194.7.118|2001:da8:7000:7:202:194:7:118
+ha|202.196.64.194|2001:da8:5000:6c00::47
+hb|115.156.123.19|2001:250:4001:4::8
+hn|202.197.61.57|2001:250:4400:64::57
+gd|202.38.193.28|2001:da8:2000:2193::28
+gx|210.36.16.35|2001:250:3401:1::35
+hi|210.37.8.40|2001:250:3800:18::40
+cq|202.202.2.6|2001:da8:c800:2::6
+sc|211.83.159.99|
+gz|210.40.12.58|2001:250:2c00::60
+yn|113.55.13.95|2001:250:2800:0:28:0:13:95
+xz|222.19.73.23|
+sn|202.117.1.13|2001:250:1001:1::ca75:10d
+gs|202.201.0.81|2001:da8:c000:2::2026
+qh|210.27.177.240|2001:250:1e01:1::240
+nx|222.23.220.245|2001:250:1c00:1::245
+xj|111.115.76.75|2001:250:1800:1997::4
+"
+
+run_route_edu() {
+	local d="$1" fam="${2:-4}" dir=edu prefix=rte lkey=late sep=: batch line prov v4 v6 ip n=0 hops
+	command -v ping >/dev/null 2>&1 || return 0
+	if [ "$fam" = 6 ]; then
+		[ "$IS_LINUX" = 1 ] || return 0
+		dir=edu6 prefix=rte6 lkey=late6 sep=/
+	fi
+	mkdir -p "$d/$dir"
+	batch=$(route_batch)
+	printf '%s\n' "$EDU_NODES" | while IFS='|' read -r prov v4 v6; do
+		[ -n "$prov" ] || continue
+		ip=$v4
+		[ "$fam" = 6 ] && ip=$v6
+		[ -n "$ip" ] || continue
+		(
+			route_sweep "$ip" "$d/$dir/$prov.hops" "$fam" 0
+			hops=$(sort -t"$sep" -k1,1n "$d/$dir/$prov.hops" 2>/dev/null | awk -F"$sep" '!seen[$2]++' | paste -sd, -)
+			put "$d/$dir" "${prefix}_$prov" "${hops:-none}"
+			put "$d/$dir" "${lkey}_$prov" "$(lat_node "$ip")"
+		) &
+		n=$((n + 1))
+		[ $((n % batch)) = 0 ] && wait
+	done
+	wait
+	[ "$DEEP" = 1 ] && route_rtt "$d/$dir" "$sep"
+	return 0
 }
 
 run_route_full() {
@@ -1702,7 +1770,11 @@ stage_net() {
 			run_route_full "$d"
 			progress "$(t "[网络] 全省回程线路 · 大包…" "[Network] Return routes with large packets…")"
 			run_route_full "$d" 4 1400
+			progress "$(t "[网络] 教育网回程…" "[Network] CERNET return routes…")"
+			run_route_edu "$d"
 			if [ "$NET_V6" = yes ]; then
+				progress "$(t "[网络] 教育网回程 CERNET2…" "[Network] CERNET2 return routes…")"
+				run_route_edu "$d" 6
 				progress "$(t "[网络] 全省回程线路 IPv6…" "[Network] Return routes over IPv6…")"
 				run_route_full "$d" 6
 			fi
@@ -1732,6 +1804,8 @@ stage_route() {
 		# 全部检测: 网络阶段已按深度模式追踪过回程 (带每跳延迟), 直接复用, 不再追踪一遍; 不报用时 (报 0 秒会让人误解)
 		cat "$TMP/net/route/fields" >>"$d/fields"
 		cat "$TMP/net/routel/fields" >>"$d/fields" 2>/dev/null
+		cat "$TMP/net/edu/fields" >>"$d/fields" 2>/dev/null
+		cat "$TMP/net/edu6/fields" >>"$d/fields" 2>/dev/null
 		cat "$TMP/net/route6/fields" >>"$d/fields" 2>/dev/null
 		ROUTE_REUSED=1
 	else
@@ -1742,13 +1816,15 @@ stage_route() {
 			run_route_full "$d"
 			progress "$(t "[网络] 全省回程线路 · 大包…" "[Network] Return routes with large packets…")"
 			run_route_full "$d" 4 1400
+			progress "$(t "[网络] 教育网回程…" "[Network] CERNET return routes…")"
+			run_route_edu "$d"
 		else
 			progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
 			run_route "$d"
 		fi
 		if [ -n "$(curl -6 -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ]; then
 			progress "$(t "[网络] 逐跳回程路由 IPv6…" "[Network] Hop-by-hop routes over IPv6…")"
-			if [ "$ROUTE_FULL" = 1 ]; then run_route_full "$d" 6; else run_route "$d" 6; fi
+			if [ "$ROUTE_FULL" = 1 ]; then run_route_full "$d" 6; run_route_edu "$d" 6; else run_route "$d" 6; fi
 		fi
 		cat "$d"/*/fields >>"$d/fields" 2>/dev/null
 	fi
@@ -1801,6 +1877,7 @@ menu_select() {
 		printf '  %s%s5%s  Network          BGP latency routes speed  %sabout 3 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s6%s  Routes: 3 cities location & ASN per hop    %sabout 1 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s7%s  Routes: 31 provs 3 carriers + large packets %sabout 5 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s8%s  Speed tests      nearby, China, abroad, provinces %sabout 4 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s0  Exit%s\n\n  Choose [1]: ' "$C_K" "$C_0"
 	else
 		printf '  %s%s1%s  一键全检      硬件 → IP → 网络      %s约 6 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -1810,6 +1887,7 @@ menu_select() {
 		printf '  %s%s5%s  网络质量      BGP 延迟 回程 测速    %s约 3 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s6%s  回程线路 三城 逐跳位置与 ASN        %s约 1 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s7%s  回程线路 全省 31 省三网 + 大包       %s约 5 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s8%s  带宽测速      就近 三网 国际 分省      %s约 4 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s0  退出%s\n\n  请选择 [1]: ' "$C_K" "$C_0"
 	fi
 	read -r choice </dev/tty || choice=1
@@ -1826,6 +1904,7 @@ menu_select() {
 	5) STAGES=" net" ;;
 	6) STAGES=" route" ;;
 	7) STAGES=" route"; ROUTE_FULL=1 ;;
+	8) STAGES=" net"; SKIP=",latency,route,"; CN_SPEED=1 ;;
 	0 | q | Q) exit 0 ;;
 	*) STAGES=" hw ip net" ;;
 	esac

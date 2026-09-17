@@ -141,6 +141,44 @@ const UNKNOWN = C("unknown", "未识别", "Unknown", "neutral")
 
 export type Carrier = "ct" | "cu" | "cm"
 
+// 教育网线路常见的境外转接方 (骨干网段表里没有的几家), 按地址段前缀认
+const TRANSIT: Array<[name: string, prefixes: string[]]> = [
+  ["HE", ["184.104.", "184.105.", "216.218.", "74.82.", "64.62.", "2001:470:"]],
+  ["NTT", ["129.250.", "2001:218:"]],
+  ["Cogent", ["154.54.", "2001:550:"]],
+  ["HKIX", ["123.255.90.", "202.40.161.", "2001:7fa:"]],
+  ["Equinix", ["206.223.", "27.111.228.", "2001:de8:"]],
+]
+
+function transitOf(ip: string): string | null {
+  const v = ip.toLowerCase()
+  for (const [name, prefixes] of TRANSIT) {
+    if (prefixes.some((p) => v.startsWith(p))) return name
+  }
+  return null
+}
+
+/**
+ * 教育网回程: CERNET 自己不在骨干网段表里, 看这条线路在进教育网之前最后经过的骨干网 ——
+ * 结果形如 CMI / 163 / 4837 / CN2, 认不出就是未识别。
+ */
+export function classifyEdu(route: RouteHop[]): { code: string, label: Pair } | null {
+  let last: string | null = null
+  for (const h of route) {
+    const asn = hopAsn(h.ip)
+    if (asn) { last = asn; continue }
+    const t = transitOf(h.ip)
+    if (t) last = t
+  }
+  if (!last) return null
+  const name: Record<string, Pair> = {
+    AS4809: ["CN2", "CN2"], AS4134: ["163", "163"], AS23764: ["CTGNET", "CTGNET"],
+    AS9929: ["9929", "9929"], AS10099: ["CUG", "CUG"], AS4837: ["4837", "4837"],
+    AS58807: ["CMIN2", "CMIN2"], AS58453: ["CMI", "CMI"], AS9808: ["CMNET", "CMNET"],
+  }
+  return { code: last, label: name[last] ?? [last, last] }
+}
+
 export function classifyRoute(carrier: Carrier, route: RouteHop[]): RouteClass {
   // 按 TTL 分组, 每跳一组 ASN
   const byTtl = new Map<number, Set<string>>()

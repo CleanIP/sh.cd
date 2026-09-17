@@ -2,6 +2,13 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.6.1 · 2026-09-18
+
+### Added
+
+- CERNET return routes, measured together with the provincial routes: one university per province, IPv4 over CERNET and IPv6 over CERNET2, showing the last backbone before CERNET plus latency and loss
+- Menu option 8 runs bandwidth tests only — nearby, Chinese carriers, six regions abroad and provincial servers — without waiting for latency and routes
+
 ## v1.6.0 · 2026-09-18
 
 ### Added
