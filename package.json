@@ -1,0 +1,16 @@
+{
+  "name": "sh.cd",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run server/main.ts",
+    "dev": "bun --watch run server/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "bash -n check.sh && bun test && tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "5.9.3"
+  }
+}

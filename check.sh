@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
 #
-# CleanIP ipcheck — 服务器全面体检: 硬件与性能 · IP 质量 · 网络质量
+# sh.cd — 服务器全面体检: 硬件与性能 · IP 质量 · 网络质量 (CleanIP 出品)
 #
 #   bash <(curl -Ls https://sh.cd)
-#   bash <(curl -Ls https://cleanip.io/ipcheck)        备用入口
 #
 # 在终端里运行会进入菜单, 一键全检按 硬件 → IP → 网络 的顺序一口气测完, 每一项测完立即显示结果, 最后一屏总览。
 # IP 情报与评分、BGP 信息来自 CleanIP; 硬件跑分、解锁、邮件端口、三网延迟与回程、测速都在本机实测,
-# 测完把结果提交给 CleanIP 排版成报告。
+# 测完把结果提交给 sh.cd 排版成报告。
 #
 # 默认不安装任何软件、不修改系统, 只依赖 bash 与 curl。CPU / 内存跑分与硬盘读写需要 sysbench、fio,
 # 系统里没有时先询问, 同意才安装 (-y 直接安装); 不安装则用系统自带工具近似测量。
 # 兼容 bash 3.2 (macOS 自带版本): 不用关联数组 / mapfile / ${var,,}。
 #
-# 源码: https://github.com/CleanIP/ipcheck    许可: MIT
+# 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.0.0"
-API="${IPCHECK_API:-https://cleanip.io}"
+VERSION="1.1.0"
+API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
-UA_SELF="ipcheck/$VERSION (+https://sh.cd)"
+UA_SELF="sh.cd/$VERSION (+https://sh.cd)"
 
 # ── 参数 ────────────────────────────────────────────────────────────────
 
@@ -39,7 +38,7 @@ t() { if [ "$LANG_OPT" = en ]; then printf '%s' "$2"; else printf '%s' "$1"; fi;
 usage() {
 	if [ "$LANG_OPT" = en ]; then
 		cat <<EOF
-CleanIP ipcheck v$VERSION — server check-up: hardware · IP quality · network
+sh.cd v$VERSION — server check-up by CleanIP: hardware · IP quality · network
 
 Usage: bash <(curl -Ls https://sh.cd) [options]
 Run without options in a terminal to open the menu.
@@ -60,11 +59,11 @@ Run without options in a terminal to open the menu.
   -l zh|en      Language (-E = English)
   -h / -v       Help / version
 
-Source: https://github.com/CleanIP/ipcheck
+Source: https://github.com/CleanIP/sh.cd
 EOF
 	else
 		cat <<EOF
-CleanIP ipcheck v$VERSION — 服务器全面体检: 硬件与性能 · IP 质量 · 网络质量
+sh.cd v$VERSION — CleanIP 服务器全面体检: 硬件与性能 · IP 质量 · 网络质量
 
 用法: bash <(curl -Ls https://sh.cd) [参数]
 在终端里不带参数运行会进入菜单。
@@ -85,7 +84,7 @@ CleanIP ipcheck v$VERSION — 服务器全面体检: 硬件与性能 · IP 质�
   -l zh|en      语言 (-E 等同 -l en)
   -h / -v       帮助 / 版本
 
-源码: https://github.com/CleanIP/ipcheck
+源码: https://github.com/CleanIP/sh.cd
 EOF
 	fi
 }
@@ -115,7 +114,7 @@ while getopts ":HINAdy46x:i:asS:jnl:Ehv" opt; do
 	l) case "$OPTARG" in en* | EN*) LANG_OPT=en ;; *) LANG_OPT=zh ;; esac ;;
 	E) LANG_OPT=en ;;
 	h) usage; exit 0 ;;
-	v) echo "ipcheck $VERSION"; exit 0 ;;
+	v) echo "sh.cd $VERSION"; exit 0 ;;
 	:) printf '%s\n' "$(t "参数 -$OPTARG 缺少值" "Option -$OPTARG requires a value")" >&2; exit 2 ;;
 	*) usage >&2; exit 2 ;;
 	esac
@@ -145,7 +144,7 @@ fi
 IS_LINUX=0
 [ "$(uname -s)" = Linux ] && IS_LINUX=1
 
-TMP=$(mktemp -d 2>/dev/null || mktemp -d -t ipcheck)
+TMP=$(mktemp -d 2>/dev/null || mktemp -d -t shcd)
 BENCH_FILE=""
 cleanup() {
 	jobs -p 2>/dev/null | xargs kill -9 2>/dev/null
@@ -432,7 +431,7 @@ FIO_ENGINE=psync
 # 输出 读KiB/s|读IOPS 或 写KiB/s|写IOPS (fio terse v3: 读在第 7/8 列, 写在第 48/49 列)
 fio_run() {
 	local rw="$1" bs="$2" depth="$3" secs="$4" out
-	out=$(cd "$BENCH_DIR" && with_timeout $((secs + 60)) fio --name=ipcheck --filename=.ipcheck-fio --size=512M --direct=1 \
+	out=$(cd "$BENCH_DIR" && with_timeout $((secs + 60)) fio --name=shcd --filename=.shcd-fio --size=512M --direct=1 \
 		--rw="$rw" --bs="$bs" --iodepth="$depth" --ioengine="$FIO_ENGINE" --runtime="$secs" --time_based \
 		--group_reporting --output-format=terse --terse-version=3 2>/dev/null | tail -n1)
 	case "$rw" in
@@ -475,7 +474,7 @@ hw_bench() {
 	fi
 
 	[ -n "$BENCH_DIR" ] || return 0
-	BENCH_FILE="$BENCH_DIR/.ipcheck-fio"
+	BENCH_FILE="$BENCH_DIR/.shcd-fio"
 	if command -v fio >/dev/null 2>&1; then
 		for k in libaio io_uring posixaio; do
 			if fio --enghelp 2>/dev/null | grep -qw "$k"; then FIO_ENGINE=$k; break; fi
@@ -495,7 +494,7 @@ hw_bench() {
 		rm -f "$BENCH_FILE"
 	elif [ "$IS_LINUX" = 1 ]; then
 		progress "$(t "[硬件] 硬盘读写 (dd)…" "[Hardware] Disk I/O (dd)…")"
-		BENCH_FILE="$BENCH_DIR/.ipcheck-dd"
+		BENCH_FILE="$BENCH_DIR/.shcd-dd"
 		w=$(dd if=/dev/zero of="$BENCH_FILE" bs=1M count=1024 oflag=direct 2>&1 | dd_rate)
 		r=$(dd if="$BENCH_FILE" of=/dev/null bs=1M iflag=direct 2>&1 | dd_rate)
 		k=$(dd if=/dev/zero of="$BENCH_FILE" bs=4k count=2000 oflag=dsync 2>&1 | dd_secs | awk '$1 + 0 > 0 { printf "%.0f", 2000 / $1 }')
@@ -717,7 +716,7 @@ run_mail() {
 run_dns() {
 	local d="$1" resp uuid host p
 	mkdir -p "$d/dns"
-	resp=$(ccurl -s -m 8 -X POST -A "$UA_SELF" "$API/api/dns-probe/start" 2>/dev/null)
+	resp=$(ccurl -s -m 8 -X POST -A "$UA_SELF" "$API/dns/start" 2>/dev/null)
 	uuid=$(printf '%s' "$resp" | grep -oE '"uuid":"[0-9a-f]{32}"' | cut -d'"' -f4)
 	host=$(printf '%s' "$resp" | grep -oE '"probeHost":"[^"]+"' | cut -d'"' -f4)
 	[ -n "$uuid" ] && [ -n "$host" ] || return 0
@@ -744,13 +743,13 @@ stage_ip_exit() {
 	: >"$d/fields"
 	set_net "$fam"
 
-	# Cloudflare 的 /cdn-cgi/trace 在 v4 / v6 都能回显来源 IP, 顺便确认连得上 CleanIP
+	# Cloudflare 的 /cdn-cgi/trace 在 v4 / v6 都能回显来源 IP, 顺便确认连得上 sh.cd
 	ip=$(ccurl -s -m 8 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')
 	if [ -z "$ip" ]; then
 		progress_done
 		# 默认双栈检测时, 没有 IPv6 很常见, 不当成错误
 		if [ "$JSON" != 1 ] && { [ -n "$ONLY_FAMILY" ] || [ "$ex" != 6 ]; }; then
-			printf '  %s\n' "$(t "$label 无法连接到 cleanip.io, 已跳过" "$label cannot reach cleanip.io, skipped")" >&2
+			printf '  %s\n' "$(t "$label 无法连接到 sh.cd, 已跳过" "$label cannot reach sh.cd, skipped")" >&2
 		fi
 		return 1
 	fi
@@ -1193,8 +1192,8 @@ SEQ=1
 # 提交一个阶段的本机检测结果, 服务端返回排好版的报告 (或 JSON)
 post_report() {
 	local stage="$1" file="$2" out="$3" fam="$4" args line code body
-	# 调试: IPCHECK_DUMP=1 只打印本机检测结果, 不提交
-	if [ -n "${IPCHECK_DUMP:-}" ]; then
+	# 调试: SHCD_DUMP=1 只打印本机检测结果, 不提交
+	if [ -n "${SHCD_DUMP:-}" ]; then
 		printf '== %s\n' "$stage"
 		sort "$file"
 		echo '{}' >"$out"
@@ -1208,7 +1207,7 @@ post_report() {
 		[ -n "$line" ] && args+=(--data-urlencode "$line")
 	done <"$file"
 	progress "$(t "生成报告…" "Building report…")"
-	body=$(ccurl -s -m 60 -A "$UA_SELF" -w '\n%{http_code}' "${args[@]}" "$API/ipcheck/report" 2>/dev/null)
+	body=$(ccurl -s -m 60 -A "$UA_SELF" -w '\n%{http_code}' "${args[@]}" "$API/report" 2>/dev/null)
 	code=${body##*$'\n'}
 	body=${body%$'\n'*}
 	progress_done

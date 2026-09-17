@@ -1,0 +1,31 @@
+# systemd 服务: 复制到 /etc/systemd/system/sh.cd.service
+#   useradd --system --no-create-home --shell /usr/sbin/nologin shcd
+#   mkdir -p /opt/sh.cd/app /opt/sh.cd/data && chown shcd:shcd /opt/sh.cd/data
+#   systemctl daemon-reload && systemctl enable --now sh.cd
+
+[Unit]
+Description=sh.cd check-up script and report service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shcd
+Group=shcd
+WorkingDirectory=/opt/sh.cd/app
+EnvironmentFile=/opt/sh.cd/sh.cd.env
+Environment=DATA_DIR=/opt/sh.cd/data
+# 代码目录只读, 不需要 Bun 的转译缓存
+Environment=BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+ExecStart=/usr/local/bin/bun run server/main.ts
+Restart=always
+RestartSec=2
+MemoryMax=256M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/sh.cd/data
+
+[Install]
+WantedBy=multi-user.target

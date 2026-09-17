@@ -1,15 +1,9 @@
-# ipcheck
+# sh.cd
 
 CleanIP 出品的服务器全面体检脚本：硬件与性能、IP 质量、网络质量，一行命令跑完。
 
 ```bash
 bash <(curl -Ls https://sh.cd)
-```
-
-备用入口：
-
-```bash
-bash <(curl -Ls https://cleanip.io/ipcheck)
 ```
 
 在终端里运行会进入菜单。一键全检按 **硬件 → IP → 网络** 的顺序一口气测完，中途不需要操作，每一项测完立即显示结果，最后给出一屏总览。
@@ -101,14 +95,14 @@ bash <(curl -Ls https://sh.cd) -A -E -j > report.json
 
 ## 会发送哪些数据
 
-脚本在本机完成检测后，按阶段把结果提交到 cleanip.io 生成报告：
+脚本在本机完成检测后，按阶段把结果提交到 sh.cd 生成报告：
 
 - 硬件：系统与内核版本、虚拟化类型、主板 / CPU / 显卡 / 网卡型号、内存与硬盘容量、跑分结果
 - IP：解锁状态与地区、邮箱握手成功与否、一次性的 DNS 检测编号
 - 网络：NAT 类型与公网 IP、TCP 参数、三网延迟、回程逐跳 IP、测速结果
 - 脚本版本、报告语言与是否带颜色
 
-IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定其他 IP。脚本不读取、不发送主机名、文件或登录信息。
+IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定其他 IP；IP 情报由 sh.cd 向 CleanIP 查询。脚本不读取、不发送主机名、文件或登录信息。
 
 ## 数据来源与致谢
 
@@ -117,6 +111,31 @@ IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定�
 - 回程线路的骨干网段与判定规则参考 [oneclickvirt/backtrace](https://github.com/oneclickvirt/backtrace)（Apache-2.0）
 - 测速节点来自 Speedtest 的公开节点，国内节点清单参考 [spiritLHLS/speedtest.net-CN-ID](https://github.com/spiritLHLS/speedtest.net-CN-ID) 与 [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT），逐个实测后选用；国际节点为 GSL Networks
 - 三网延迟节点：zstatic 公共测试节点
+
+## 仓库结构
+
+```
+check.sh            检测脚本, 在用户机器上运行 (bash 3.2 兼容, 只依赖 curl)
+server/main.ts      服务入口 (Bun, 无第三方依赖): 下发脚本 / 浏览器说明页 / 生成报告
+server/report.ts    按阶段解析脚本提交的字段, 调用 render/ 排版
+server/render/      终端报告排版: 硬件、IP、网络、回程判定、总览
+server/upstream.ts  IP 情报、DNS 出口、BGP 数据的获取
+server/landing.ts   浏览器打开 sh.cd 时的说明页
+tests/              排版与字段解析测试
+deploy/             systemd 服务、环境变量样例、发布脚本
+```
+
+## 开发
+
+```bash
+bun install           # 只装类型检查用的开发依赖
+bun run check         # 脚本语法 + 测试 + 类型检查
+bun run dev           # 本地起服务, 默认 127.0.0.1:3410
+SHCD_API=http://127.0.0.1:3410 bash check.sh -H    # 让脚本提交到本地服务
+SHCD_DUMP=1 bash check.sh -N                        # 只打印本机检测字段, 不提交
+```
+
+服务需要的环境变量见 `deploy/sh.cd.env.example`；发布用 `deploy/deploy.sh`，连接参数写在不进仓库的 `deploy/.env`。
 
 ## 许可
 
@@ -132,4 +151,4 @@ A one-line server check-up by CleanIP: hardware and benchmarks, IP quality, and 
 bash <(curl -Ls https://sh.cd) -E
 ```
 
-Run it in a terminal to open the menu. The full check-up runs hardware → IP → network, shows each section as soon as it finishes, and asks before moving on. Requires bash (3.2+) and curl; sysbench and fio are installed only if you agree (or with `-y`). Run with `-h` for all options.
+Run it in a terminal to open the menu. The full check-up runs hardware → IP → network straight through, shows each section as soon as it finishes, and ends with a one-screen summary. Requires bash (3.2+) and curl; sysbench and fio are installed only if you agree (or with `-y`). Run with `-h` for all options.
