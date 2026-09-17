@@ -3,6 +3,7 @@
 //   GET  /            curl / wget 拿到检测脚本 check.sh; 浏览器 (Accept 带 text/html) 拿到说明页, ?raw=1 强制返回脚本
 //   POST /report      生成报告 (server/report.ts)
 //   POST /dns/start   DNS 出口检测: 发一个一次性子域名
+//   GET  /fonts/*    首页字体 Ioskeley Mono (SIL OFL 1.1, 授权文本 /fonts/OFL.txt)
 //   GET  /healthz
 //
 // 只监听本机, 由反向代理转发; 访客 IP 取反代写入的 X-Real-IP (反代必须覆盖客户端自带的同名头)。
@@ -16,6 +17,7 @@ import { handleReport, type Form } from "./report"
 import { dnsProbeStart } from "./upstream"
 
 const SCRIPT = resolve(import.meta.dir, "../check.sh")
+const FONTS = resolve(import.meta.dir, "../assets/fonts")
 const MAX_BODY = 96_000
 
 let cached: { mtimeMs: number, body: string } | null = null
@@ -71,6 +73,21 @@ const server = Bun.serve({
 
     if (url.pathname === "/dns/start" && req.method === "POST") {
       return Response.json(dnsProbeStart(), { headers: { "cache-control": "no-store" } })
+    }
+
+    // 字体按文件名白名单取, 不拼任意路径; 文件名不变内容就不变, 可以长期缓存
+    const font = /^\/fonts\/(IoskeleyMono-(?:Regular|SemiBold)\.woff2|OFL\.txt)$/.exec(url.pathname)
+    if (font && (req.method === "GET" || req.method === "HEAD")) {
+      const file = Bun.file(resolve(FONTS, font[1]!))
+      if (await file.exists()) {
+        return new Response(file, {
+          headers: {
+            "content-type": font[1]!.endsWith(".woff2") ? "font/woff2" : "text/plain; charset=utf-8",
+            "cache-control": "public, max-age=31536000, immutable",
+            "access-control-allow-origin": "*",
+          },
+        })
+      }
     }
 
     if (url.pathname === "/healthz") return new Response("ok\n")

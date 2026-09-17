@@ -25,11 +25,11 @@ bun test >/dev/null
 bunx tsc --noEmit -p tsconfig.json
 
 REV="$(git rev-parse --short=12 HEAD)"
-git diff --quiet HEAD -- check.sh server package.json || REV="$REV-wip-$(date -u +%Y%m%d%H%M%S)"
+git diff --quiet HEAD -- check.sh server assets package.json || REV="$REV-wip-$(date -u +%Y%m%d%H%M%S)"
 VERSION="$(sed -n 's/^VERSION="\(.*\)"$/\1/p' check.sh)"
 
 echo "==> 上传 $REV (脚本 v$VERSION)"
-rsync -az --delete -e "ssh $SSH_OPTS" --exclude .DS_Store check.sh package.json server "$SHCD_HOST:$REMOTE/app/"
+rsync -az --delete -e "ssh $SSH_OPTS" --exclude .DS_Store check.sh package.json server assets "$SHCD_HOST:$REMOTE/app/"
 remote "echo '$REV $(date -u +%FT%TZ)' > $REMOTE/app/REVISION && systemctl restart sh.cd && sleep 1 && systemctl is-active --quiet sh.cd && curl -sf http://127.0.0.1:\$(sed -n 's/^PORT=//p' $REMOTE/sh.cd.env)/healthz >/dev/null" \
   || { echo "❌ 服务没有起来:"; remote "journalctl -u sh.cd -n 20 --no-pager"; exit 1; }
 

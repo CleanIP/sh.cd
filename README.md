@@ -120,7 +120,9 @@ server/main.ts      服务入口 (Bun, 无第三方依赖): 下发脚本 / 浏�
 server/report.ts    按阶段解析脚本提交的字段, 调用 render/ 排版
 server/render/      终端报告排版: 硬件、IP、网络、回程判定、总览
 server/upstream.ts  IP 情报、DNS 出口、BGP 数据的获取
-server/landing.ts   浏览器打开 sh.cd 时的说明页
+server/landing.ts   浏览器打开 sh.cd 时的首页
+server/sample.ts    首页的示例报告 (示例数据, 用线上同一套排版生成)
+assets/fonts/       首页字体 Ioskeley Mono (SIL OFL 1.1, 授权见 OFL.txt)
 tests/              排版与字段解析测试
 deploy/             systemd 服务、环境变量样例、发布脚本
 ```

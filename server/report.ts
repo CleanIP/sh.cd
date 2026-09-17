@@ -14,7 +14,7 @@
 
 import { hitStats, recordHit } from "./hits"
 import { rateLimit, rateLimitKey } from "./limit"
-import { createRenderer, fullReportUrl, langOf, renderHeader, renderIpSections, W, width, type Renderer } from "./render/base"
+import { createRenderer, fullReportUrl, langOf, renderHeader, renderIpSections, stageBar } from "./render/base"
 import { HW_TITLE, parseHw, renderHw } from "./render/hw"
 import { renderIpDetail } from "./render/ip"
 import { parseIpcheckFields, renderLocalSections } from "./render/local"
@@ -38,16 +38,6 @@ const json = (value: unknown): Reply =>
   ({ status: 200, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }, body: JSON.stringify(value) })
 
 const STAGES = ["hw", "ip", "net", "route", "summary"] as const
-
-/** 阶段标题条: 方块 + 标题 + 细线 + 用时 */
-function stageBar(R: Renderer, title: string, dur: number | null): string {
-  const { paint, lang } = R
-  const took = dur === null ? "" : dur >= 60
-    ? (lang === "zh" ? `用时 ${Math.floor(dur / 60)} 分 ${dur % 60} 秒` : `took ${Math.floor(dur / 60)}m ${dur % 60}s`)
-    : (lang === "zh" ? `用时 ${dur} 秒` : `took ${dur}s`)
-  const fill = Math.max(2, W - 2 - 2 - 2 - width(title) - 2 - width(took) - (took ? 1 : 0))
-  return `  ${paint("██", "brand")}  ${paint(title, "bold")}  ${paint("─".repeat(fill), "gray")}${took ? " " + paint(took, "gray") : ""}`
-}
 
 /** 总览的用时: 脚本把各阶段的 dur 都交上来 (同名字段解析成数组) 时求和 */
 function sumDur(v: string | string[] | undefined): number {

@@ -238,6 +238,16 @@ export function renderHeader(R: Renderer, subtitle: string, tagline: string): st
   ]
 }
 
+/** 阶段标题条: 方块 + 标题 + 细线 + 用时 */
+export function stageBar(R: Renderer, title: string, dur: number | null): string {
+  const { paint, lang } = R
+  const took = dur === null ? "" : dur >= 60
+    ? (lang === "zh" ? `用时 ${Math.floor(dur / 60)} 分 ${dur % 60} 秒` : `took ${Math.floor(dur / 60)}m ${dur % 60}s`)
+    : (lang === "zh" ? `用时 ${dur} 秒` : `took ${dur}s`)
+  const fill = Math.max(2, W - 2 - 2 - 2 - width(title) - 2 - width(took) - (took ? 1 : 0))
+  return `  ${paint("██", "brand")}  ${paint(title, "bold")}  ${paint("─".repeat(fill), "gray")}${took ? " " + paint(took, "gray") : ""}`
+}
+
 /** IP 基本信息 + 评分两段, 到评分段结尾的分隔线为止。 */
 export function renderIpSections(R: Renderer, r: IpReport & { ip: string }): string[] {
   const { lang, L, paint, tonePaint, badge, hr, row, color } = R
