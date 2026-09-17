@@ -16,9 +16,9 @@ export const PLACES: Record<string, Pair> = {
   mnl: ["马尼拉", "Manila"], sgn: ["胡志明市", "Ho Chi Minh"], bom: ["孟买", "Mumbai"],
   dxb: ["迪拜", "Dubai"], ruh: ["利雅得", "Riyadh"], tlv: ["特拉维夫", "Tel Aviv"],
   lon: ["伦敦", "London"], fra: ["法兰克福", "Frankfurt"], ams: ["阿姆斯特丹", "Amsterdam"], par: ["巴黎", "Paris"],
-  mad: ["马德里", "Madrid"], war: ["华沙", "Warsaw"],
+  mad: ["马德里", "Madrid"], war: ["华沙", "Warsaw"], hel: ["赫尔辛基", "Helsinki"], mow: ["莫斯科", "Moscow"], ist: ["伊斯坦布尔", "Istanbul"],
   jnb: ["约翰内斯堡", "Jo'burg"], cai: ["开罗", "Cairo"], cas: ["卡萨布兰卡", "Casablanca"],
-  lax: ["洛杉矶", "Los Angeles"], dfw: ["达拉斯", "Dallas"], nyc: ["纽约", "New York"], yyz: ["多伦多", "Toronto"],
+  lax: ["洛杉矶", "Los Angeles"], sjc: ["圣何塞", "San Jose"], sea: ["西雅图", "Seattle"], dfw: ["达拉斯", "Dallas"], nyc: ["纽约", "New York"], yyz: ["多伦多", "Toronto"],
   gru: ["圣保罗", "São Paulo"], scl: ["圣地亚哥", "Santiago"],
   syd: ["悉尼", "Sydney"], akl: ["奥克兰", "Auckland"],
 }
@@ -27,9 +27,9 @@ export const PLACES: Record<string, Pair> = {
 export const INTL_GROUPS: Array<{ name: Pair, places: string[] }> = [
   { name: ["亚洲", "Asia"], places: ["hk", "tpe", "tyo", "sel", "sgp", "kul", "bkk", "jkt", "mnl", "sgn", "bom"] },
   { name: ["中东", "M. East"], places: ["dxb", "ruh", "tlv"] },
-  { name: ["欧洲", "Europe"], places: ["lon", "fra", "ams", "par", "mad", "war"] },
+  { name: ["欧洲", "Europe"], places: ["lon", "fra", "ams", "par", "mad", "war", "hel", "mow", "ist"] },
   { name: ["非洲", "Africa"], places: ["jnb", "cai", "cas"] },
-  { name: ["北美", "N. America"], places: ["lax", "dfw", "nyc", "yyz"] },
+  { name: ["北美", "N. America"], places: ["lax", "sjc", "sea", "dfw", "nyc", "yyz"] },
   { name: ["南美", "S. America"], places: ["gru", "scl"] },
   { name: ["大洋洲", "Oceania"], places: ["syd", "akl"] },
 ]

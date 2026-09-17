@@ -2,6 +2,12 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.5.1 · 2026-09-18
+
+### Added
+
+- 5 more international latency sites, 36 in total: Helsinki, Moscow and Istanbul in Europe; San Jose and Seattle in North America
+
 ## v1.5.0 · 2026-09-18
 
 ### Added

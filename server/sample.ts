@@ -76,8 +76,8 @@ const NET_FIELDS = {
   // 国际延迟: 洛杉矶机 2026-09-18 实测的量级
   il_hk: "146.3", il_tpe: "133.1", il_tyo: "102.9", il_sel: "133.5", il_sgp: "175.6", il_kul: "172.5", il_bkk: "196.2",
   il_jkt: "177.1", il_mnl: "161.3", il_sgn: "194.9", il_bom: "231.2", il_dxb: "270.0", il_ruh: "238.7", il_tlv: "205.4",
-  il_lon: "127.9", il_fra: "164.3", il_ams: "163.0", il_par: "143.5", il_mad: "144.0", il_war: "163.2",
-  il_jnb: "310.6", il_cai: "209.5", il_cas: "193.6", il_lax: "1.3", il_dfw: "43.4", il_nyc: "61.7", il_yyz: "80.4",
+  il_lon: "127.9", il_fra: "164.3", il_ams: "163.0", il_par: "143.5", il_mad: "144.0", il_war: "163.2", il_hel: "176.2", il_mow: "208.8", il_ist: "203.0",
+  il_jnb: "310.6", il_cai: "209.5", il_cas: "193.6", il_lax: "1.3", il_sjc: "9.8", il_sea: "25.6", il_dfw: "43.4", il_nyc: "61.7", il_yyz: "80.4",
   il_gru: "205.1", il_scl: "197.5", il_syd: "176.1", il_akl: "279.1",
   dur: "168",
 }

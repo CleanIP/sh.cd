@@ -15,7 +15,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.5.0"
+VERSION="1.5.1"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -1365,7 +1365,7 @@ fra|intl|fra|fr5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080
 lon|intl|lon|thn.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080'
 
 # 国际延迟节点: 地点代码:主机[|备用主机], 都是 Speedtest 公开节点 (8080 端口), 主机连不上才测备用。
-# 覆盖各大洲: 亚洲 11 · 中东 3 · 欧洲 6 · 非洲 3 · 北美 4 · 南美 2 · 大洋洲 2。优先机房 / 骨干网节点 (GSL Networks 等),
+# 覆盖各大洲: 亚洲 11 · 中东 3 · 欧洲 9 · 非洲 3 · 北美 6 · 南美 2 · 大洋洲 2。优先机房 / 骨干网节点 (GSL Networks 等),
 # 当地没有时用当地主要运营商; 2026-09-18 在洛杉矶、香港与本地逐个实测都能连上、延迟与地理位置相符后选用。
 # 不用 Misaka 约翰内斯堡 (洛杉矶连它每次 SYN 重传, 1.3 秒)、Etisalat Misr 开罗 (香港 460ms 绕路)、Freshtel 吉隆坡 (香港绕路 180ms)。
 INTL_NODES="
@@ -1389,10 +1389,15 @@ ams:am5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
 par:par.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
 mad:mad.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
 war:war.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+hel:hls.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net|speedtest-hki.retn.net.prod.hosts.ooklaserver.net
+mow:speedtest.dme.fdcservers.net|speedtest.omega-connect.net
+ist:ookla.premierdc.com.tr.prod.hosts.ooklaserver.net|umr1speedtest.turktelekom.com.tr
 jnb:zatjnb01-ookla1.syrex.co.za.prod.hosts.ooklaserver.net|jhbspeed.rain.co.za
 cai:speedtest12.vodafone.com.eg.prod.hosts.ooklaserver.net|speedtestob.orange.eg.prod.hosts.ooklaserver.net
 cas:casablancast.iam.ma.prod.hosts.ooklaserver.net|speedtestcasa3.meditel.net.ma.prod.hosts.ooklaserver.net
 lax:la2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+sjc:speedtest-sjc.sectrify.com.prod.hosts.ooklaserver.net|speedtest.sjc.sonic.net
+sea:sea.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net|speedtest01.wowrack.com
 dfw:dal.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
 nyc:ny2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
 yyz:sttoronto.rogers.com|wirelinespeedtesttoronto.srvr.bell.ca.prod.hosts.ooklaserver.net
@@ -1586,9 +1591,9 @@ run_intl_latency() {
 			done
 			put "$d/intl" "il_${item%%:*}" "$([ -n "$best" ] && awk -v v="$best" 'BEGIN { printf "%.1f", v * 1000 }' || echo fail)"
 		) &
-		# 分两批并发: 31 个节点同时解析域名, 慢的 DNS 会拖到超时
+		# 分两批并发: 36 个节点同时解析域名, 慢的 DNS 会拖到超时
 		n=$((n + 1))
-		[ $((n % 16)) = 0 ] && wait
+		[ $((n % 18)) = 0 ] && wait
 	done
 	wait
 }

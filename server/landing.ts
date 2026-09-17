@@ -87,7 +87,7 @@ const COPY: Record<Lang, Copy> = {
       },
       {
         name: "网络质量", flag: "-N", time: "约 3–5 分钟",
-        items: ["NAT 类型（NAT1–4）与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟，IPv4 与 IPv6", "CN2 GIA / 9929 / CMIN2 回程，含 IPv6", "三网与国际测速，分省测速（-p）", "六大洲 31 个国际节点延迟"],
+        items: ["NAT 类型（NAT1–4）与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟，IPv4 与 IPv6", "CN2 GIA / 9929 / CMIN2 回程，含 IPv6", "三网与国际测速，分省测速（-p）", "六大洲 36 个国际节点延迟"],
       },
     ],
     optionsTitle: "参数",
@@ -162,7 +162,7 @@ const COPY: Record<Lang, Copy> = {
       },
       {
         name: "Network quality", flag: "-N", time: "3–5 min",
-        items: ["NAT type (NAT1–4) and TCP settings", "BGP upstreams, peers and RPKI", "Latency to 31 provinces, IPv4 + IPv6", "CN2 GIA / 9929 / CMIN2, IPv4 + IPv6", "Speed to China, provinces (-p), abroad", "Latency to 31 sites on 6 continents"],
+        items: ["NAT type (NAT1–4) and TCP settings", "BGP upstreams, peers and RPKI", "Latency to 31 provinces, IPv4 + IPv6", "CN2 GIA / 9929 / CMIN2, IPv4 + IPv6", "Speed to China, provinces (-p), abroad", "Latency to 36 sites on 6 continents"],
       },
     ],
     optionsTitle: "Options",
