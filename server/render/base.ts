@@ -224,6 +224,23 @@ export function createRenderer(lang: Lang, color: boolean): Renderer {
   }
 }
 
+/** SH.CD 字符画 (ANSI Shadow 字体), 与 check.sh 的 SHCD_LOGO 逐字一致 (tests/banner.test.ts 核对) */
+export const BANNER_LOGO = [
+  "███████╗██╗  ██╗    ██████╗██████╗",
+  "██╔════╝██║  ██║   ██╔════╝██╔══██╗",
+  "███████╗███████║   ██║     ██║  ██║",
+  "╚════██║██╔══██║   ██║     ██║  ██║",
+  "███████║██║  ██║██╗╚██████╗██████╔╝",
+  "╚══════╝╚═╝  ╚═╝╚═╝ ╚═════╝╚═════╝",
+]
+
+/** 脚本开头: 空行 + 字符画 (方块品牌绿、阴影灰) + 空行 + 副标题 + 标语 + 空行。和 check.sh print_banner 输出一致 */
+export function renderBanner(R: Renderer, subtitle: string, tagline: string): string[] {
+  const { paint } = R
+  const logo = (line: string) => line.split(/(█+)/).map((seg) => (!seg ? "" : seg.startsWith("█") ? paint(seg, "brand") : paint(seg, "gray"))).join("")
+  return ["", ...BANNER_LOGO.map((line) => `  ${logo(line)}`), "", `  ${paint(subtitle, "bold")}`, `  ${paint(tagline, "gray")}`, ""]
+}
+
 /** 品牌头: 空行 + 方块 logo + CleanIP.io + 副标题 + 标语 + 双线 + 空行。副标题 + 8 列缩进总宽不要超过 W。 */
 export function renderHeader(R: Renderer, subtitle: string, tagline: string): string[] {
   const { paint } = R

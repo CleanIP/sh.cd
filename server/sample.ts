@@ -2,7 +2,9 @@
 // 数值取自真实运行的量级, IP、网段、ASN、主机名都是文档示例值 (203.0.113.0/24、AS64500), 不指向任何真实机器。
 // 各段用和线上报告完全相同的排版函数生成, 报告格式改了示例自动跟上。
 
-import { createRenderer, renderHeader, renderIpSections, stageBar, type Lang } from "./render/base"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { createRenderer, renderBanner, renderIpSections, stageBar, type Lang } from "./render/base"
 import { HW_TITLE, parseHw, renderHw } from "./render/hw"
 import { renderIpDetail, type FullReport } from "./render/ip"
 import { MAIL, parseIpcheckFields, PROVINCES, renderLocalSections } from "./render/local"
@@ -120,15 +122,18 @@ function sampleIp(lang: Lang): FullReport & { ip: string } {
   }
 }
 
+// 版本号跟着脚本走, 发新版不用改这里
+const VERSION = /^VERSION="([\d.]+)"$/m.exec(readFileSync(resolve(import.meta.dir, "../check.sh"), "utf8"))?.[1] ?? ""
+
 export type SampleTab = "summary" | "hw" | "ip" | "net"
 
 /** 四段示例报告 (带 ANSI 颜色), 首页按标签切换 */
 export function sampleReports(lang: Lang): Record<SampleTab, string> {
   const R = createRenderer(lang, true)
   const zh = lang === "zh"
-  const header = renderHeader(R,
+  const header = renderBanner(R,
     zh ? "服务器体检 · 硬件与性能 · IP 质量 · 网络质量" : "Server check-up · Hardware · IP quality · Network",
-    "https://sh.cd")
+    `v${VERSION} · ${zh ? "CleanIP 出品" : "by CleanIP"} · https://sh.cd`)
   const hw = parseHw(HW_FIELDS)!
   const net = parseNet(NET_FIELDS)!
   const local = parseIpcheckFields(IP_FIELDS)

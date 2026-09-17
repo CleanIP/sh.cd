@@ -1154,11 +1154,31 @@ stage_name() {
 	esac
 }
 
+# 开头的 SH.CD 字符画 (ANSI Shadow 字体): 方块用品牌绿, 阴影线用灰色。
+# 首页示例用的 server/render/base.ts BANNER_LOGO 必须与这里逐字一致 (tests/banner.test.ts 核对)。
+SHCD_LOGO='███████╗██╗  ██╗    ██████╗██████╗
+██╔════╝██║  ██║   ██╔════╝██╔══██╗
+███████╗███████║   ██║     ██║  ██║
+╚════██║██╔══██║   ██║     ██║  ██║
+███████║██║  ██║██╗╚██████╗██████╔╝
+╚══════╝╚═╝  ╚═╝╚═╝ ╚═════╝╚═════╝'
+
+print_banner() {
+	local line
+	printf '\n'
+	while IFS= read -r line; do
+		# 整行先设灰色, 每个方块切成绿色再切回灰色
+		printf '  %s%s%s\n' "$C_K" "${line//█/$C_G█$C_K}" "$C_0"
+	done <<EOF
+$SHCD_LOGO
+EOF
+	printf '\n  %s%s%s\n' "$C_B" "$(t "服务器体检 · 硬件与性能 · IP 质量 · 网络质量" "Server check-up · Hardware · IP quality · Network")" "$C_0"
+	printf '  %s%s%s\n\n' "$C_K" "v$VERSION · $(t "CleanIP 出品" "by CleanIP") · https://sh.cd" "$C_0"
+}
+
 menu_select() {
 	local choice
 	if [ "$LANG_OPT" = en ]; then
-		printf '\n  %s██%s  %sCleanIP server check-up%s%29s%s\n' "$C_G" "$C_0" "$C_B" "$C_0" "" "${C_K}sh.cd · v$VERSION$C_0"
-		printf '      %sHardware, performance, IP purity and network routes%s\n\n' "$C_K" "$C_0"
 		printf '  %s%s1%s  Full check-up    hardware → IP → network   %sabout 6 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s2%s  Hardware         CPU memory disk scores    %sabout 2 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  IP quality       purity unlocks blacklists %sabout 30 s%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -1166,8 +1186,6 @@ menu_select() {
 		printf '  %s%s5%s  Route details    location & ASN per hop    %sabout 1 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s0  Exit%s\n\n  Choose [1]: ' "$C_K" "$C_0"
 	else
-		printf '\n  %s██%s  %sCleanIP 服务器体检%s%28s%s\n' "$C_G" "$C_0" "$C_B" "$C_0" "" "${C_K}sh.cd · v$VERSION$C_0"
-		printf '      %s硬件、性能、IP 纯净度、网络线路，一次查清%s\n\n' "$C_K" "$C_0"
 		printf '  %s%s1%s  一键全检      硬件 → IP → 网络      %s约 6 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s2%s  硬件与性能    系统 CPU 内存 硬盘    %s约 2 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  IP 质量       纯净度 解锁 黑名单    %s约 30 秒%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -1200,7 +1218,7 @@ post_report() {
 		return 0
 	fi
 	set_net "$fam"
-	args=(-d "v=$VERSION" -d "lang=$LANG_OPT" -d "color=$COLOR" -d "stage=$stage" -d "seq=$SEQ" -d "stages=$STAGE_COUNT")
+	args=(-d "v=$VERSION" -d "lang=$LANG_OPT" -d "color=$COLOR" -d "stage=$stage" -d "seq=$SEQ" -d "stages=$STAGE_COUNT" -d "banner=$BANNER")
 	[ "$JSON" = 1 ] && args+=(-d format=json)
 	[ -n "$PROXY" ] && args+=(-d via=proxy)
 	while IFS= read -r line; do
@@ -1222,6 +1240,13 @@ post_report() {
 }
 
 # ── 主流程 ──────────────────────────────────────────────────────────────
+
+# 字符画开头 (JSON 输出时不打印); 打印过就告诉服务端, 报告里不再重复报告头
+BANNER=0
+if [ "$JSON" = 0 ]; then
+	print_banner
+	BANNER=1
+fi
 
 if [ -z "$STAGES" ]; then
 	if [ "$INTERACTIVE" = 1 ]; then menu_select; else STAGES=" ip"; fi

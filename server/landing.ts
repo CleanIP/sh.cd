@@ -5,7 +5,7 @@
 // 版式呼应终端报告: 章节标题 = 绿色方块 + 标题 + 细线, 和报告里的阶段标题条一致。
 // 访客可见文案不写实现细节 (后端 / 缓存 / 接口名等)。
 
-import type { Lang } from "./render/base"
+import { BANNER_LOGO, type Lang } from "./render/base"
 import { sampleReports, type SampleTab } from "./sample"
 
 // —— ANSI → HTML ——
@@ -53,6 +53,17 @@ function ansiToHtml(input: string): string {
   }
   emit(input.slice(last))
   return out
+}
+
+/** 报告转 HTML; 开头的字符画单独包一层, 行距设成字体里方块的高度 (1.25em), 上下正好连成片 */
+function reportHtml(report: string): string {
+  const lines = report.split("\n")
+  const at = lines.findIndex((l) => l.replace(/\x1b\[[\d;]*m/g, "") === `  ${BANNER_LOGO[0]}`)
+  if (at < 0) return ansiToHtml(report)
+  const end = at + BANNER_LOGO.length
+  return ansiToHtml(lines.slice(0, at).join("\n"))
+    + `<span class="logo">${ansiToHtml(lines.slice(at, end).join("\n"))}</span>`
+    + ansiToHtml(lines.slice(end).join("\n"))
 }
 
 // —— 文案 ——
@@ -374,6 +385,7 @@ section { padding-block: var(--space-12); }
 .term { height: 640px; margin: 0; padding: var(--space-4) var(--space-6) var(--space-6); overflow: auto; color: var(--term-text); font: 400 var(--text-base)/1.5 var(--font-mono); scrollbar-color: var(--color-neutral-700) transparent; }
 .term .cursor { height: 1.2em; margin: 0; }
 .term .w1 { display: inline-block; width: 1ch; }
+.term .logo { display: block; line-height: 1.25; }
 /* 汉字占两格; 字形略放大贴近终端里的观感 (transform 不影响排版宽度) */
 .term .w2 { display: inline-block; width: 2ch; text-align: center; transform: scale(1.08); }
 .a-b { font-weight: 600; color: var(--color-neutral-0); }
@@ -591,7 +603,7 @@ export function landingPage(lang: Lang): string {
       </div>
       <div class="term-win">
         <div class="term-bar"><span class="term-cmd"><b>$</b> ${escapeHtml(COMMAND)} -A${lang === "en" ? " -E" : ""}</span></div>
-        ${order.map((k, i) => `<pre class="term" id="panel-${k}" role="tabpanel" aria-labelledby="tab-${k}" tabindex="0"${i === 0 ? "" : " hidden"}>${ansiToHtml(reports[k])}\n\n  <span class="a-g">$</span> <span class="cursor" aria-hidden="true"></span></pre>`).join("\n        ")}
+        ${order.map((k, i) => `<pre class="term" id="panel-${k}" role="tabpanel" aria-labelledby="tab-${k}" tabindex="0"${i === 0 ? "" : " hidden"}>${reportHtml(reports[k])}\n\n  <span class="a-g">$</span> <span class="cursor" aria-hidden="true"></span></pre>`).join("\n        ")}
       </div>
     </div>
   </section>

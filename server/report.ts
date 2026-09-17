@@ -10,7 +10,7 @@
 //
 // 表单字段见 check.sh 各阶段注释与 render/local.ts 顶注; 另有:
 //   v=1.1.0  lang=zh|en  color=0|1  format=json  stage=…  seq=本次运行的第几次提交 (1 才计数)
-//   stages=本次计划跑几项  via=proxy  dur=阶段耗时秒  deep=1
+//   stages=本次计划跑几项  via=proxy  dur=阶段耗时秒  deep=1  banner=1 (脚本已打印开头字符画)
 
 import { hitStats, recordHit } from "./hits"
 import { rateLimit, rateLimitKey } from "./limit"
@@ -74,7 +74,8 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
     : "This IP has been restricted due to automated scraping.\nIf this is a mistake, let us know at https://cleanip.io/feedback\n")
 
   const header = (stageTitle: string) => {
-    if (one("seq") === "1") {
+    // 脚本已经在终端里打印了开头字符画 (banner=1) 时不再重复报告头
+    if (one("seq") === "1" && one("banner") !== "1") {
       out.push(...renderHeader(R,
         zh ? "服务器体检 · 硬件与性能 · IP 质量 · 网络质量" : "Server check-up · Hardware · IP quality · Network",
         `sh.cd${version ? ` v${version}` : ""}`))
