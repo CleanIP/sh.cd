@@ -75,12 +75,12 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
 
   const header = (stageTitle: string) => {
     // 脚本已经在终端里打印了开头字符画 (banner=1) 时不再重复报告头
-    if (one("seq") === "1" && one("banner") !== "1") {
+    if (one("seq") !== "1") {
+      out.push("")
+    } else if (one("banner") !== "1") {
       out.push(...renderHeader(R,
         zh ? "服务器体检 · 硬件与性能 · IP 质量 · 网络质量" : "Server check-up · Hardware · IP quality · Network",
         `sh.cd${version ? ` v${version}` : ""}`))
-    } else {
-      out.push("")
     }
     out.push(stageBar(R, stageTitle, dur), "")
   }
