@@ -4,7 +4,7 @@
 //   POST /report      生成报告 (server/report.ts)
 //   POST /dns/start   DNS 出口检测: 发一个一次性子域名
 //   GET  /changelog   更新日志: 浏览器给网页, curl 给 Markdown 纯文本 (server/changelog.ts)
-//   GET  /fonts/*    首页字体 Ioskeley Mono (SIL OFL 1.1, 授权文本 /fonts/OFL.txt)
+//   GET  /fonts/*    官网字体 Ioskeley Mono 与 Sora (均为 SIL OFL 1.1, 授权文本 /fonts/OFL.txt、/fonts/OFL-Sora.txt)
 //   GET  /healthz
 //
 // 只监听本机, 由反向代理转发; 访客 IP 取反代写入的 X-Real-IP (反代必须覆盖客户端自带的同名头)。
@@ -87,7 +87,7 @@ const server = Bun.serve({
     }
 
     // 字体按文件名白名单取, 不拼任意路径; 文件名不变内容就不变, 可以长期缓存
-    const font = /^\/fonts\/(IoskeleyMono-(?:Regular|SemiBold)\.woff2|OFL\.txt)$/.exec(url.pathname)
+    const font = /^\/fonts\/(IoskeleyMono-(?:Regular|SemiBold)\.woff2|Sora-Latin\.woff2|OFL\.txt|OFL-Sora\.txt)$/.exec(url.pathname)
     if (font && (req.method === "GET" || req.method === "HEAD")) {
       const file = Bun.file(resolve(FONTS, font[1]!))
       if (await file.exists()) {

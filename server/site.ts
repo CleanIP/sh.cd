@@ -2,7 +2,8 @@
 //
 // 整站一份样式表 (首页各区块的样式也在这里), 每页只内联一次, 不另发 CSS 文件。
 // 设计令牌: 品牌绿 + 中性灰, 字号 12/14/16/20/24/32, 间距 4 的倍数, 圆角 4/8/12。
-// 字体 Ioskeley Mono (SIL OFL 1.1) 由本服务 /fonts/ 提供, 中文回落到系统黑体。
+// 字体 Ioskeley Mono (SIL OFL 1.1) 由本服务 /fonts/ 提供, 中文回落到系统黑体;
+// 品牌名 CleanIP 用 Sora (SIL OFL 1.1, 只保留英文字母与符号的子集, 可变字重)。
 
 import type { Lang } from "./render/base"
 import { VERSION } from "./version"
@@ -21,6 +22,7 @@ export const icon = (name: string, size: number) =>
 export const SITE_CSS = `
 @font-face { font-family: "Ioskeley Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/IoskeleyMono-Regular.woff2") format("woff2"); }
 @font-face { font-family: "Ioskeley Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url("/fonts/IoskeleyMono-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Sora"; font-style: normal; font-weight: 100 800; font-display: swap; src: url("/fonts/Sora-Latin.woff2") format("woff2"); unicode-range: U+0020-007E; }
 
 :root {
   --color-primary: #35a952;
@@ -59,6 +61,7 @@ export const SITE_CSS = `
   --radius-md: 8px;
   --radius-lg: 12px;
   --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --font-brand: "Sora", -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Ioskeley Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", monospace;
   --term-text: #d1d5db;
   --content: 1080px;
@@ -79,6 +82,8 @@ button { font: inherit; color: inherit; }
 .brand { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-lg); font-weight: 600; }
 .brand-block { width: var(--space-3); height: var(--space-6); background: var(--color-primary); }
 .brand-by { font-size: var(--text-xs); font-weight: 400; color: var(--color-neutral-500); }
+/* 品牌名 CleanIP 统一用 Sora */
+.cleanip { font-family: var(--font-brand); font-weight: 600; letter-spacing: -0.01em; }
 .nav { display: flex; align-items: center; gap: var(--space-6); font-size: var(--text-sm); color: var(--color-neutral-500); }
 .nav a { white-space: nowrap; }
 .nav a:hover, .nav a[aria-current="page"] { color: var(--color-neutral-900); }
@@ -297,7 +302,7 @@ export function siteHeader(lang: Lang, page: Page): string {
   const current = (p: Page) => (p === page ? ' aria-current="page"' : "")
   return `<header class="top">
   <div class="wrap">
-    <a class="brand" href="${href("home", lang)}"><span class="brand-block" aria-hidden="true"></span>sh.cd<span class="brand-by">by CleanIP</span></a>
+    <a class="brand" href="${href("home", lang)}"><span class="brand-block" aria-hidden="true"></span>sh.cd<span class="brand-by">by <span class="cleanip">CleanIP</span></span></a>
     <nav class="nav" aria-label="sh.cd">
       <a class="hide-sm" href="${anchor("#sample")}">${c.nav.sample}</a>
       <a class="hide-sm" href="${anchor("#checks")}">${c.nav.checks}</a>
@@ -319,8 +324,9 @@ export function siteFooter(lang: Lang): string {
     <div class="links">
       <a href="${href("changelog", lang)}">${c.nav.changelog}</a>
       <a href="https://github.com/CleanIP/sh.cd">${c.source}</a>
-      <a href="https://cleanip.io${lang === "en" ? "/en" : ""}">CleanIP.io</a>
+      <a class="cleanip" href="https://cleanip.io${lang === "en" ? "/en" : ""}">CleanIP.io</a>
       <a href="https://github.com/ahatem/IoskeleyMono">${c.font} Ioskeley Mono</a>
+      <a href="https://github.com/sora-xor/sora-font">Sora</a>
     </div>
   </div>
 </footer>`
