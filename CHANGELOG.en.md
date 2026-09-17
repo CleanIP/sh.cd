@@ -13,7 +13,7 @@ New features and fixes in each release, newest first. Versions match the script'
 - Mail handshakes distinguish success / refused / unreachable; refusals usually mean the provider rejects the IP's reputation
 - On an IPv6 exit, sites without IPv6 (TikTok, Prime Video, Reddit) are marked "No IPv6"
 - Changelog page on the website
-- The CleanIP brand name on the website uses the Sora typeface
+- CleanIP on the website is shown as the official logo
 
 ### Fixed
 

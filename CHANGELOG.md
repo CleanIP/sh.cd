@@ -13,7 +13,7 @@
 - 邮箱握手区分「握手成功 / 被拒收 / 连不上」三种结果，被拒收多为对方按 IP 信誉拒绝
 - IPv6 出口检测遇到本身不支持 IPv6 的网站（TikTok、Prime Video、Reddit）标为「不支持 IPv6」
 - 官网新增更新日志页面
-- 官网里的品牌名 CleanIP 使用 Sora 字体
+- 官网里的 CleanIP 改用官方 logo
 
 ### 修复
 

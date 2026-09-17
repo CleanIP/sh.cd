@@ -126,7 +126,8 @@ server/landing.ts   浏览器打开 sh.cd 时的首页
 server/changelog.ts 更新日志页 https://sh.cd/changelog
 server/site.ts      官网各页共用的样式、顶栏与页脚
 server/sample.ts    首页的示例报告 (示例数据, 用线上同一套排版生成)
-assets/fonts/       官网字体 Ioskeley Mono 与 Sora 子集 (均为 SIL OFL 1.1, 授权见 OFL.txt / OFL-Sora.txt)
+assets/fonts/       官网字体 Ioskeley Mono (SIL OFL 1.1, 授权见 OFL.txt)
+assets/brand/       CleanIP logo
 tests/              排版与字段解析测试
 deploy/             systemd 服务、环境变量样例、发布脚本
 ```

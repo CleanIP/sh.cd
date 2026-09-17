@@ -6,7 +6,7 @@
 // 访客可见文案不写实现细节 (后端 / 缓存 / 接口名等)。
 
 import { BANNER_LOGO, type Lang } from "./render/base"
-import { escapeHtml, href, icon, pageHead, siteFooter, siteHeader } from "./site"
+import { cleanipLogo, escapeHtml, href, icon, pageHead, siteFooter, siteHeader } from "./site"
 import { VERSION } from "./version"
 import { sampleReports, type SampleTab } from "./sample"
 
@@ -104,7 +104,7 @@ const COPY: Record<Lang, Copy> = {
   zh: {
     title: "sh.cd · 一行命令体检服务器",
     description: "一行命令体检服务器：硬件与性能跑分、IP 纯净度与流媒体解锁、BGP、三网延迟与回程线路、国内外带宽测速。",
-    eyebrow: "服务器体检脚本 · <span class=\"cleanip\">CleanIP</span> 出品",
+    eyebrow: "服务器体检脚本 · {logo} 出品",
     changelog: "更新日志",
     heading: ["一行命令，", "给服务器做一次全面体检"],
     lead: "硬件与性能、IP 纯净度与解锁、BGP 与三网回程、国内外带宽，一口气测完，最后给一屏适合截图的总览。",
@@ -174,7 +174,7 @@ const COPY: Record<Lang, Copy> = {
   en: {
     title: "sh.cd · One-line server check-up",
     description: "One command to check a server: hardware benchmarks, IP purity and streaming unlocks, BGP, latency and return routes to China, and bandwidth.",
-    eyebrow: "Server check-up script · by <span class=\"cleanip\">CleanIP</span>",
+    eyebrow: "Server check-up script · by {logo}",
     changelog: "Changelog",
     heading: ["One command,", "a full server check-up"],
     lead: "Hardware and benchmarks, IP purity and unlocks, BGP and return routes to China, bandwidth at home and abroad — all in one run, ending with a one-screen summary.",
@@ -313,7 +313,7 @@ ${siteHeader(lang, "home")}
 
 <main class="wrap">
   <div class="hero">
-    <p class="eyebrow">${t.eyebrow}<a class="eyebrow-link" href="${href("changelog", lang)}">v${VERSION} · ${t.changelog} →</a></p>
+    <p class="eyebrow">${t.eyebrow.replace("{logo}", cleanipLogo(14))}<a class="eyebrow-link" href="${href("changelog", lang)}">v${VERSION} · ${t.changelog} →</a></p>
     <h1>${t.heading[0]}<br><span class="dim">${t.heading[1]}</span></h1>
     <p class="lead">${t.lead}</p>
     <div class="cmd">
