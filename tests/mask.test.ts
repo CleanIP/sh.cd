@@ -20,7 +20,7 @@ describe("分享打码", () => {
     const R = createRenderer("zh", false, "203.0.113.227");
     const text = (hostname: string) => renderIpSections(R, { ip: "203.0.113.227", ip_version: 4, hostname }).join("\n");
     expect(text("203-0-113-227.static.example.net")).toContain("*.static.example.net");
-    expect(text("203-0-113-227.static.example.net")).not.toContain("57");
+    expect(text("203-0-113-227.static.example.net")).not.toContain("113");
     expect(text("my-vps")).not.toContain("my-vps");
     expect(text("203.0.113.227")).not.toContain("203.0.113.227");
   });
@@ -35,7 +35,7 @@ describe("分享打码", () => {
       ...renderSummary(R, { hw: null, ip: { ip: "203.0.113.227" }, local: null, net, took: 60 }),
     ];
     const text = all.map(strip).join("\n");
-    expect(text).not.toMatch(/38\.64\.\d/);
+    expect(text).not.toMatch(/203\.0\.\d/);
     expect(text).toContain("203.0.*.*/24");
     expect(text).toContain("59.43.189.37");
     expect(text).toContain("bash <(curl -Ls https://sh.cd)");

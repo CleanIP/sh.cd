@@ -235,7 +235,7 @@ export function ipMasker(self: string | null | undefined): (s: string) => string
   }
 }
 
-/** 反查主机名打码: 常把 IP 编进第一段 (203-0-113-227.example.net), 只留后面的域名; 只有一段或本身是 IP 时不显示 */
+/** 反查主机名打码: 常把 IP 编进第一段 (203-0-113-7.example.net), 只留后面的域名; 只有一段或本身是 IP 时不显示 */
 function hostMasker(self: string | null | undefined): (s: string) => string | null {
   return (h) => {
     if (!self) return h
