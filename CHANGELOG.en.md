@@ -2,6 +2,12 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.3.1 · 2026-09-18
+
+### Fixed
+
+- With the bash that ships with macOS, some terminals showed the CLEAN IP banner as garbled, uncolored characters; the ATTO and speed test progress lines had the same problem
+
 ## v1.3.0 · 2026-09-18
 
 ### Added

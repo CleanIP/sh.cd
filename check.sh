@@ -10,11 +10,12 @@
 #
 # 默认不安装任何软件、不修改系统, 只依赖 bash 与 curl。CPU / 内存跑分与硬盘读写需要 sysbench、fio,
 # 系统里没有时先询问, 同意才安装 (-y 直接安装); 不安装则用系统自带工具近似测量。
-# 兼容 bash 3.2 (macOS 自带版本): 不用关联数组 / mapfile / ${var,,}。
+# 兼容 bash 3.2 (macOS 自带版本): 不用关联数组 / mapfile / ${var,,}; 变量后面紧跟中文或符号时要写 ${var}
+# (UTF-8 区域设置下 bash 3.2 会把后面字符的首字节当成变量名, 输出乱码)。
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.3.0"
+VERSION="1.3.1"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -661,7 +662,7 @@ hw_bench() {
 		put "$d" bn_s1q8 "$(fio_run read 1m 8 4)|$(fio_run write 1m 8 4)"
 		if [ "$DEEP" = 1 ]; then
 			for k in 512 1k 2k 4k 8k 16k 32k 64k 128k 256k 512k 1m 2m 4m 8m 16m 32m 64m; do
-				progress "$(t "[硬件] ATTO 块大小 $k…" "[Hardware] ATTO block size $k…")"
+				progress "$(t "[硬件] ATTO 块大小 ${k}…" "[Hardware] ATTO block size ${k}…")"
 				put "$d" "bn_atto_$k" "$(fio_run read "$k" 4 2)|$(fio_run write "$k" 4 2)"
 			done
 		fi
@@ -1435,7 +1436,7 @@ $nodes"
 			settled=0
 		fi
 		[ "$settled" = 1 ] && continue
-		progress "$(t "[网络] 带宽测速 $((n + 1))/$total…" "[Network] Bandwidth $((n + 1))/$total…")"
+		progress "$(t "[网络] 带宽测速 $((n + 1))/${total}…" "[Network] Bandwidth $((n + 1))/${total}…")"
 		idx=$((idx + 1))
 		if ! speed_hello "$hostport" </dev/null; then
 			[ -n "$best" ] || best="$carrier|$place|fail|fail"
@@ -1512,7 +1513,7 @@ EOF
 		fi
 		[ "$done_group" = "$group" ] && continue
 		grep -qx "$hostport" "$d/spcn/ok" 2>/dev/null || continue
-		progress "$(t "[网络] 分省测速 $i/$total…" "[Network] Provincial speed $i/$total…")"
+		progress "$(t "[网络] 分省测速 $i/${total}…" "[Network] Provincial speed $i/${total}…")"
 		mkdir -p "$d/spcn/$group"
 		down=$(SPEED_WARM=1 SPEED_SPAN=3 speed_dir down "$hostport" "$d/spcn/$group" </dev/null)
 		up=$(SPEED_WARM=1 SPEED_SPAN=3 speed_dir up "$hostport" "$d/spcn/$group" </dev/null)
@@ -1635,7 +1636,7 @@ print_banner() {
 	printf '\n'
 	while IFS= read -r line; do
 		# 整行先设灰色, 每个方块切成绿色再切回灰色
-		printf '  %s%s%s\n' "$C_K" "${line//█/$C_G█$C_K}" "$C_0"
+		printf '  %s%s%s\n' "$C_K" "${line//█/${C_G}█${C_K}}" "$C_0"
 	done <<EOF
 $SHCD_LOGO
 EOF
