@@ -25,7 +25,8 @@ import { dnsProbeStart } from "./upstream"
 
 const SCRIPT = resolve(import.meta.dir, "../check.sh")
 const FONTS = resolve(import.meta.dir, "../assets/fonts")
-const MAX_BODY = 96_000
+// 全省回程 (-R) 一次要交 93 条线路 × 最多三份 (普通 / 大包 / IPv6), 表单编码后比原文大一倍
+const MAX_BODY = 400_000
 
 let cached: { mtimeMs: number, body: string } | null = null
 

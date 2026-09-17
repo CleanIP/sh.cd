@@ -44,6 +44,8 @@ export interface NetData {
   latency: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
   latency6: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
   routes: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
+  /** 大包回程 (-R): 同一批目标改发 1400 字节的包再扫一遍 */
+  routesLarge: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
   routes6: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
   /** 分省测速: null = 该组节点都连不上 */
   speedCn: Array<{ province: string, carrier: Carrier, result: { city: string, down: number | "stall" | null, up: number | "stall" | null } | null }>
@@ -82,7 +84,7 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
   const keys = Object.keys(body)
   if (!keys.some((k) => /^(nt_|lat6?_|rt6?_|sp_|spc_|il_)/.test(k))) return null
   const data: NetData = {
-    nat: null, tcp: null, v6: null, latency: [], latency6: [], routes: [], routes6: [], speed: [], speedCn: [], intl: [],
+    nat: null, tcp: null, v6: null, latency: [], latency6: [], routes: [], routesLarge: [], routes6: [], speed: [], speedCn: [], intl: [],
     deep: body.deep === "1", dur: num(str(body.dur)),
   }
 
@@ -106,10 +108,12 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
   // IPv4 跳点 TTL:IP[:毫秒]; IPv6 地址本身带冒号, 用斜杠 TTL/IP[/毫秒]
   const routeSets = [
     { key: "rt", list: data.routes, sep: ":", re: new RegExp(`^\\d{1,2}:${IPV4}(:\\d{1,4})?$`) },
+    { key: "rtl", list: data.routesLarge, sep: ":", re: new RegExp(`^\\d{1,2}:${IPV4}(:\\d{1,4})?$`) },
     { key: "rt6", list: data.routes6, sep: "/", re: /^\d{1,2}\/[0-9a-fA-F:]{2,39}(\/\d{1,4})?$/ },
   ]
+  // 三城模式只有 bj / sh / gd, 全省模式 (-R) 是 31 个省, 用同一套字段名
   for (const { key, list, sep, re } of routeSets) {
-    for (const [city] of ROUTE_CITIES) {
+    for (const [city] of PROVINCES) {
       for (const carrier of CARRIERS) {
         const v = str(body[`${key}_${city}_${carrier}`])
         if (v === "none") {
@@ -197,6 +201,10 @@ const T = {
   cu: ["联通", "Unicom"],
   cm: ["移动", "Mobile"],
   routes: ["三网回程线路", "Return routes to China"],
+  routesFull: ["全省回程线路", "Return routes by province"],
+  routesLarge: ["大包回程", "Large-packet routes"],
+  routeNote: ["线路 · 延迟 ms · 丢包", "line · latency ms · loss"],
+  routeNoteLarge: ["1400 字节的包走的线路, 与上表不同说明大包绕路或被限速", "Path of 1400-byte packets; differs = detour or throttle"],
   routeNone: ["无回应", "No reply"],
   routeLegend: ["精品线路: CN2 GIA · CTGNET · 9929 · CMIN2", "Premium: CN2 GIA · CTGNET · 9929 · CMIN2"],
   speed: ["带宽测速", "Bandwidth"],
@@ -368,8 +376,48 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     out.push(`  ${paint(L(T.routeLegend), "gray")}`)
     out.push(hr())
   }
-  routeTable(net.routes, L(T.routes))
-  routeTable(net.routes6, `${L(T.routes)} · IPv6`)
+  /** 全省回程 (-R): 31 省 × 三网, 每格 = 线路简称 + 延迟中位数 + 丢包 */
+  const fullRouteTable = (rows: NetData["routes"], latency: NetData["latency"], heading: string, note?: string) => {
+    if (!rows.length) return
+    const LABEL = zh ? 8 : 12
+    // 每格: 线路 7 列 + 延迟 4 列 + 丢包 4 列, 格间空 1 列
+    const CELL = 15
+    out.push(`  ${paint(heading, "bold")}`)
+    out.push(`  ${paint(note ?? L(T.routeNote), "gray")}`)
+    out.push(`  ${pad("", LABEL)}${paint(CARRIERS.map((c) => pad(L(T[c]), CELL)).join(" ").trimEnd(), "gray")}`)
+    for (const [code, pzh, pen] of PROVINCES) {
+      const cells = rows.filter((x) => x.city === code)
+      if (!cells.length) continue
+      const value = rtrim(CARRIERS.map((c) => {
+        const r = cells.find((x) => x.carrier === c)
+        if (!r) return pad("", CELL)
+        if (!r.hops.length) return paint(pad(L(T.routeNone), CELL), "gray")
+        const cls = classifyRoute(c, r.hops)
+        const name = pad(L(ROUTE_SHORT[cls.code] ?? cls.label), 7)
+        const lat = latency.find((x) => x.province === code && x.carrier === c)
+        const s = lat ? rttSamples(lat.samples) : null
+        const med = s ? median(s.values.filter((v): v is number => v !== null)) : null
+        const loss = s ? Math.round((s.lost / s.values.length) * 100) : null
+        const msText = padL(med === null ? "" : String(Math.round(med)), 4)
+        const lossText = loss === null ? padL("", 4) : padL(`${loss}%`, 4)
+        const head = cls.code === "unknown" ? paint(name, "gray") : tonePaint(name, cls.tone, ...(cls.tone === "good" ? ["bold" as const] : []))
+        return head + paint(msText, "gray") + (loss ? tonePaint(lossText, loss > 20 ? "bad" : "warn") : paint(lossText, "gray"))
+      }).join(" "))
+      out.push(`  ${pad(fit(zh ? pzh : pen, LABEL - 1), LABEL)}${value}`)
+    }
+    out.push(`  ${paint(L(T.routeLegend), "gray")}`)
+    out.push(hr())
+  }
+  // 目标超过三个城市 = 全省模式
+  const full = new Set(net.routes.map((r) => r.city)).size > 3
+  if (full) {
+    fullRouteTable(net.routes, net.latency, L(T.routesFull))
+    fullRouteTable(net.routesLarge, net.latency, `${L(T.routesFull)} · ${L(T.routesLarge)}`, L(T.routeNoteLarge))
+    fullRouteTable(net.routes6, net.latency6, `${L(T.routesFull)} · IPv6`)
+  } else {
+    routeTable(net.routes, L(T.routes))
+    routeTable(net.routes6, `${L(T.routes)} · IPv6`)
+  }
 
   // —— 带宽测速 ——
   if (net.speed.length) {
@@ -445,16 +493,30 @@ const BACKBONE: Record<string, Pair> = {
   AS58807: ["移动 CMIN2", "CM CMIN2"], AS58453: ["移动 CMI", "CM CMI"], AS9808: ["移动 CMNET", "CM CMNET"],
 }
 
+/** 全省回程表格里的线路简称: 每格只有 7 列 */
+const ROUTE_SHORT: Record<string, Pair> = {
+  ct_cn2_gia: ["CN2GIA", "CN2GIA"], ct_cn2_gt: ["CN2GT", "CN2GT"], ct_cn2: ["CN2", "CN2"], ct_cn2_mixed: ["CN2混", "CN2mix"],
+  ct_163: ["163", "163"], ct_ctgnet: ["CTGNET", "CTGNET"],
+  cu_9929: ["9929", "9929"], cu_9929_mixed: ["9929混", "9929mix"], cu_4837: ["4837", "4837"], cu_cug: ["CUG", "CUG"],
+  cm_cmin2: ["CMIN2", "CMIN2"], cm_cmin2_mixed: ["CMIN2混", "CMIN2mx"], cm_cmi: ["CMI", "CMI"], cm_cmnet: ["CMNET", "CMNET"],
+  unknown: ["未识别", "unknown"],
+}
+
 /** 「回程路由详情」: 每个目标一段, 列出每一跳的 IP、延迟、ASN 与位置 */
 export function renderRouteDetail(R: Renderer, net: NetData, hops: Record<string, HopInfo>): string[] {
   const { L, paint, tonePaint, hr, lang } = R
   const zh = lang === "zh"
   const out: string[] = []
   const TAIL = W - 2 - 3 - 16 - 7 - 2
-  for (const [family, routes] of [["IPv4", net.routes], ["IPv6", net.routes6]] as const) {
+  const families: Array<[string, NetData["routes"]]> = [
+    ["IPv4", net.routes],
+    [`IPv4 · ${L(T.routesLarge)}`, net.routesLarge],
+    ["IPv6", net.routes6],
+  ]
+  for (const [family, routes] of families) {
     if (!routes.length) continue
-    if (family === "IPv6") out.push(`  ${paint("IPv6", "bold")}`, "")
-    for (const [code, czh, cen] of ROUTE_CITIES) {
+    if (family !== "IPv4") out.push(`  ${paint(family, "bold")}`, "")
+    for (const [code, czh, cen] of (new Set(net.routes.map((r) => r.city)).size > 3 ? PROVINCES : ROUTE_CITIES)) {
       for (const carrier of CARRIERS) {
         const r = routes.find((x) => x.city === code && x.carrier === carrier)
         if (!r) continue

@@ -15,7 +15,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.5.1"
+VERSION="1.6.0"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -35,6 +35,7 @@ AUTO_YES=0
 FULL=0
 GEEKBENCH=0
 CN_SPEED=0
+ROUTE_FULL=0
 VIRT=""
 STAGES=""
 SKIP=","
@@ -57,6 +58,7 @@ Run without options in a terminal to open the menu.
   -d            Deep mode: ATTO disk table, latency per route hop
   -g            Geekbench 6 (downloads about 220 MB; results are uploaded publicly to Geekbench Browser)
   -p            Speed tests to Chinese provincial servers (most block traffic from abroad)
+  -R            Return routes for all 31 provinces x 3 carriers, plus large packets (menu 7)
   -y            Install missing tools (sysbench, fio, …) without asking
 
   -4 / -6       IPv4 or IPv6 only (IP quality)
@@ -86,6 +88,7 @@ sh.cd v$VERSION — CleanIP 服务器全面体检: 硬件与性能 · IP 质量 
   -d            深度模式: 硬盘 ATTO 块大小表、回程每一跳的延迟
   -g            Geekbench 6 跑分 (下载约 220 MB, 结果会公开上传到 Geekbench 官网)
   -p            国内分省测速 (多数节点拦截境外来源, 国内服务器上测得全)
+  -R            全省回程: 31 省 × 三网的回程线路 + 大包回程 (同菜单第 7 项)
   -y            缺少检测工具 (sysbench / fio 等) 时直接安装, 不询问
 
   -4 / -6       只检测 IPv4 或 IPv6 (IP 质量)
@@ -109,7 +112,7 @@ for a in "$@"; do case "$a" in -E | -len* | -lEN*) LANG_OPT=en ;; esac; done
 add_stage() { case " $STAGES " in *" $1 "*) ;; *) STAGES="$STAGES $1" ;; esac; }
 
 # -a / -s 是 v0.2 的参数 (全国延迟 / 测速), 现在网络质量默认就包含, 保留兼容
-while getopts ":HINAdgpy46x:i:asS:jPnl:Ehv" opt; do
+while getopts ":HINAdgpRy46x:i:asS:jPnl:Ehv" opt; do
 	case "$opt" in
 	H) add_stage hw ;;
 	I) add_stage ip ;;
@@ -118,6 +121,7 @@ while getopts ":HINAdgpy46x:i:asS:jPnl:Ehv" opt; do
 	d) DEEP=1 ;;
 	g) GEEKBENCH=1; add_stage hw ;;
 	p) CN_SPEED=1; add_stage net ;;
+	R) ROUTE_FULL=1; add_stage route ;;
 	y) AUTO_YES=1 ;;
 	4) ONLY_FAMILY=4 ;;
 	6) ONLY_FAMILY=6 ;;
@@ -144,6 +148,7 @@ if [ "$FULL" = 1 ] && [ "$DEEP" = 1 ]; then
 	add_stage route
 	GEEKBENCH=1
 	CN_SPEED=1
+	ROUTE_FULL=1
 fi
 
 if ! command -v curl >/dev/null 2>&1; then
@@ -1032,6 +1037,7 @@ stage_ip_exit() {
 #   sp_<n>=<ct|cu|cm|intl|near>|<地点代码或城市名>|下载Mbps|上传Mbps  (fail = 连不上, stall = 节点不收发)
 #   il_<地点代码>=毫秒 或 fail
 #   spc_<省>_<ct|cu|cm>=城市|下载Mbps|上传Mbps 或 fail   分省测速 (-p)
+#   rt_<省>_<运营商>=TTL:IP[:毫秒],…  回程逐跳 (全省模式是 31 省 × 三网)   rtl_* 大包回程   rt6_* IPv6
 
 # ── 本地网络策略: NAT 类型 (纯 bash 发 STUN 请求)、TCP 拥塞控制与缓冲区 ──
 # bash 的 UDP 连接每次换源端口, 无法用同一端口问两台 STUN 服务器, 所以只区分「公网直连」与「在 NAT 后」。
@@ -1240,18 +1246,20 @@ ROUTE_TARGETS6="bj_ct=2400:89c0:1053:3::69 bj_cu=2400:89c0:1013:3::54 bj_cm=2409
 
 # $3 = 6 时走 IPv6, 输出 TTL/IP; 否则输出 TTL:IP
 hop_probe() {
-	local ttl="$1" target="$2" fam="${3:-4}" ip
+	local ttl="$1" target="$2" fam="${3:-4}" size="${4:-0}" ip pad=""
+	# 大包回程: 有些线路只对大包绕路或限速, 用 1400 字节的包再扫一遍能看出来
+	[ "$size" != 0 ] && pad="-s $size"
 	if [ "$fam" = 6 ]; then
 		# 到达目标时回复行是 "bytes from 地址: icmp_seq", 地址后面紧跟冒号要去掉; 但 "…::" 结尾的地址本身合法, 只去多出的那一个
-		ip=$(ping -6 -n -c 1 -W 1 -t "$ttl" ${IFACE:+-I "$IFACE"} "$target" 2>/dev/null | grep -oE '[Ff]rom [0-9a-fA-F:]+' | head -n1 | cut -d' ' -f2 | sed -E 's/:::$/::/; s/([0-9a-fA-F]):$/\1/')
+		ip=$(ping -6 -n -c 1 -W 1 -t "$ttl" $pad ${IFACE:+-I "$IFACE"} "$target" 2>/dev/null | grep -oE '[Ff]rom [0-9a-fA-F:]+' | head -n1 | cut -d' ' -f2 | sed -E 's/:::$/::/; s/([0-9a-fA-F]):$/\1/')
 		[ -n "$ip" ] && echo "$ttl/$ip"
 		return 0
 	fi
 	if [ "$(uname -s)" = Darwin ]; then
 		# macOS: -m 是 TTL, -W 单位毫秒; -t 在 macOS 上是总超时
-		ip=$(ping -n -c 1 -W 1000 -m "$ttl" "$target" 2>/dev/null | grep -oE '[Ff]rom ([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 | cut -d' ' -f2)
+		ip=$(ping -n -c 1 -W 1000 -m "$ttl" $pad "$target" 2>/dev/null | grep -oE '[Ff]rom ([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 | cut -d' ' -f2)
 	else
-		ip=$(ping -n -c 1 -W 1 -t "$ttl" ${IFACE:+-I "$IFACE"} "$target" 2>/dev/null | grep -oE '[Ff]rom ([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 | cut -d' ' -f2)
+		ip=$(ping -n -c 1 -W 1 -t "$ttl" $pad ${IFACE:+-I "$IFACE"} "$target" 2>/dev/null | grep -oE '[Ff]rom ([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 | cut -d' ' -f2)
 	fi
 	[ -n "$ip" ] && echo "$ttl:$ip"
 }
@@ -1292,6 +1300,75 @@ route_retry() {
 			sleep 0.3
 		done
 	done
+}
+
+# ── 全省回程 (-R / 全部检测): 31 省 × 三网, 目标就是三网延迟用的那批节点, 线路与延迟一一对应 ──────
+# 3 城市模式用 backtrace 的固定 IP 精扫 (TTL 1–30, 每跳 3 个包); 全省 93 个目标那样扫要十几分钟,
+# 所以收窄到 TTL 3–16、每跳 1 个包 —— 骨干跳都落在这一段 (2026-09-18 洛杉矶实测 93 条线路全部识别出来, 94 秒)。
+# 大包回程: 同一批目标改发 1400 字节的包再扫一遍, 有些线路只对大包绕路或限速。
+#   rt_<省>_<运营商>   普通包 IPv4      rtl_<省>_<运营商>  大包 IPv4      rt6_<省>_<运营商>  IPv6
+
+# 解析主机名: getent 不是哪儿都有, 用 curl 的 remote_ip 兜底
+resolve_ip() {
+	local host="$1" fam="${2:-4}" ip=""
+	command -v getent >/dev/null 2>&1 && ip=$(getent "ahostsv$fam" "$host" 2>/dev/null | awk 'NR == 1 { print $1 }')
+	[ -n "$ip" ] || ip=$(ccurl -"$fam" -s -o /dev/null -m 4 --connect-timeout 3 -w '%{remote_ip}' "http://$host/" 2>/dev/null)
+	printf '%s' "$ip"
+}
+
+# 每个目标同时起十几个 ping, 小机器上并发要收着点
+route_batch() {
+	local n
+	n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+	case "$n" in
+	'' | *[!0-9]*) echo 4 ;;
+	*) if [ "$n" -ge 4 ]; then echo 8; elif [ "$n" -ge 2 ]; then echo 6; else echo 4; fi ;;
+	esac
+}
+
+# 一个目标扫一遍 TTL 3–16 (并发), 结果追加到文件
+route_sweep() {
+	local target="$1" out="$2" fam="${3:-4}" size="${4:-0}" ttl
+	for ttl in 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+		(hop_probe "$ttl" "$target" "$fam" "$size" >>"$out") &
+	done
+	wait
+}
+
+run_route_full() {
+	local d="$1" fam="${2:-4}" size="${3:-0}" dir=route prefix=rt sep=: batch p c key host ip n=0 hops
+	command -v ping >/dev/null 2>&1 || return 0
+	if [ "$fam" = 6 ]; then
+		[ "$IS_LINUX" = 1 ] || return 0
+		dir=route6 prefix=rt6 sep=/
+	elif [ "$size" != 0 ]; then
+		dir=routel prefix=rtl
+	fi
+	mkdir -p "$d/$dir"
+	batch=$(route_batch)
+	for p in $PROVINCES; do
+		for c in ct cu cm; do
+			key="${p}_$c"
+			host="$p-$c-dualstack.ip.zstaticcdn.com"
+			(
+				ip=$(resolve_ip "$host" "$fam")
+				if [ -z "$ip" ]; then
+					put "$d/$dir" "${prefix}_$key" none
+					exit 0
+				fi
+				route_sweep "$ip" "$d/$dir/$key.hops" "$fam" "$size"
+				# 回包被限速时头几跳会缺, 补扫一遍
+				[ "$(wc -l <"$d/$dir/$key.hops" 2>/dev/null || echo 0)" -ge 4 ] || route_sweep "$ip" "$d/$dir/$key.hops" "$fam" "$size"
+				hops=$(sort -t"$sep" -k1,1n "$d/$dir/$key.hops" 2>/dev/null | awk -F"$sep" '!seen[$2]++' | paste -sd, -)
+				put "$d/$dir" "${prefix}_$key" "${hops:-none}"
+			) &
+			n=$((n + 1))
+			[ $((n % batch)) = 0 ] && wait
+		done
+	done
+	wait
+	[ "$DEEP" = 1 ] && route_rtt "$d/$dir" "$sep"
+	return 0
 }
 
 # $2 = 6 时测 IPv6, 结果写进 $1/route6, 字段 rt6_*
@@ -1620,11 +1697,22 @@ stage_net() {
 		fi
 	fi
 	if ! skipped route; then
-		progress "$(t "[网络] 三网回程线路…" "[Network] Return routes to China…")"
-		run_route "$d"
-		if [ "$NET_V6" = yes ]; then
-			progress "$(t "[网络] 三网回程线路 IPv6…" "[Network] Return routes over IPv6…")"
-			run_route "$d" 6
+		if [ "$ROUTE_FULL" = 1 ]; then
+			progress "$(t "[网络] 全省回程线路 (31 省)…" "[Network] Return routes (31 provinces)…")"
+			run_route_full "$d"
+			progress "$(t "[网络] 全省回程线路 · 大包…" "[Network] Return routes with large packets…")"
+			run_route_full "$d" 4 1400
+			if [ "$NET_V6" = yes ]; then
+				progress "$(t "[网络] 全省回程线路 IPv6…" "[Network] Return routes over IPv6…")"
+				run_route_full "$d" 6
+			fi
+		else
+			progress "$(t "[网络] 三网回程线路…" "[Network] Return routes to China…")"
+			run_route "$d"
+			if [ "$NET_V6" = yes ]; then
+				progress "$(t "[网络] 三网回程线路 IPv6…" "[Network] Return routes over IPv6…")"
+				run_route "$d" 6
+			fi
 		fi
 	fi
 	if ! skipped speed; then
@@ -1643,16 +1731,24 @@ stage_route() {
 	if [ "$DEEP" = 1 ] && [ -s "$TMP/net/route/fields" ]; then
 		# 全部检测: 网络阶段已按深度模式追踪过回程 (带每跳延迟), 直接复用, 不再追踪一遍; 不报用时 (报 0 秒会让人误解)
 		cat "$TMP/net/route/fields" >>"$d/fields"
+		cat "$TMP/net/routel/fields" >>"$d/fields" 2>/dev/null
 		cat "$TMP/net/route6/fields" >>"$d/fields" 2>/dev/null
 		ROUTE_REUSED=1
 	else
 		set_net 4
-		progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
 		DEEP=1
-		run_route "$d"
+		if [ "$ROUTE_FULL" = 1 ]; then
+			progress "$(t "[网络] 全省回程线路 (31 省)…" "[Network] Return routes (31 provinces)…")"
+			run_route_full "$d"
+			progress "$(t "[网络] 全省回程线路 · 大包…" "[Network] Return routes with large packets…")"
+			run_route_full "$d" 4 1400
+		else
+			progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
+			run_route "$d"
+		fi
 		if [ -n "$(curl -6 -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ]; then
 			progress "$(t "[网络] 逐跳回程路由 IPv6…" "[Network] Hop-by-hop routes over IPv6…")"
-			run_route "$d" 6
+			if [ "$ROUTE_FULL" = 1 ]; then run_route_full "$d" 6; else run_route "$d" 6; fi
 		fi
 		cat "$d"/*/fields >>"$d/fields" 2>/dev/null
 	fi
@@ -1703,7 +1799,8 @@ menu_select() {
 		printf '  %s%s3%s  Hardware         CPU memory disk scores    %sabout 2 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP quality       purity unlocks blacklists %sabout 30 s%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  Network          BGP latency routes speed  %sabout 3 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s6%s  Route details    location & ASN per hop    %sabout 1 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s6%s  Routes: 3 cities location & ASN per hop    %sabout 1 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s7%s  Routes: 31 provs 3 carriers + large packets %sabout 5 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s0  Exit%s\n\n  Choose [1]: ' "$C_K" "$C_0"
 	else
 		printf '  %s%s1%s  一键全检      硬件 → IP → 网络      %s约 6 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -1711,7 +1808,8 @@ menu_select() {
 		printf '  %s%s3%s  硬件与性能    系统 CPU 内存 硬盘    %s约 2 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP 质量       纯净度 解锁 黑名单    %s约 30 秒%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  网络质量      BGP 延迟 回程 测速    %s约 3 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s6%s  回程路由详情  逐跳位置与 ASN        %s约 1 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s6%s  回程线路 三城 逐跳位置与 ASN        %s约 1 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s7%s  回程线路 全省 31 省三网 + 大包       %s约 5 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s0  退出%s\n\n  请选择 [1]: ' "$C_K" "$C_0"
 	fi
 	read -r choice </dev/tty || choice=1
@@ -1721,11 +1819,13 @@ menu_select() {
 		DEEP=1
 		GEEKBENCH=1
 		CN_SPEED=1
+		ROUTE_FULL=1
 		;;
 	3) STAGES=" hw" ;;
 	4) STAGES=" ip" ;;
 	5) STAGES=" net" ;;
 	6) STAGES=" route" ;;
+	7) STAGES=" route"; ROUTE_FULL=1 ;;
 	0 | q | Q) exit 0 ;;
 	*) STAGES=" hw ip net" ;;
 	esac

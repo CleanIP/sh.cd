@@ -2,6 +2,14 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.6.0 · 2026-09-18
+
+### Added
+
+- Return routes for all provinces: menu option 7 or `-R` (included in all checks) identifies all 93 routes (31 provinces x Telecom / Unicom / Mobile), showing line, median latency and loss per cell; the previous three-city test stays as the quick option (menu 6)
+- Large-packet routes: the same targets are probed again with 1400-byte packets; a different line means large packets detour or get throttled
+- With IPv6, return routes over IPv6 also cover all 31 provinces; deep mode shows every hop with location, latency and ASN
+
 ## v1.5.1 · 2026-09-18
 
 ### Added

@@ -87,7 +87,7 @@ const COPY: Record<Lang, Copy> = {
       },
       {
         name: "网络质量", flag: "-N", time: "约 3–5 分钟",
-        items: ["NAT 类型（NAT1–4）与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟，IPv4 与 IPv6", "CN2 GIA / 9929 / CMIN2 回程，含 IPv6", "三网与国际测速，分省测速（-p）", "六大洲 36 个国际节点延迟"],
+        items: ["NAT 类型（NAT1–4）与 TCP 策略", "BGP 上游、对等与 RPKI", "31 省三网延迟，IPv4 与 IPv6", "31 省三网回程线路（-R），含大包与 IPv6", "三网与国际测速，分省测速（-p）", "六大洲 36 个国际节点延迟"],
       },
     ],
     optionsTitle: "参数",
@@ -95,7 +95,7 @@ const COPY: Record<Lang, Copy> = {
     options: [
       ["不带参数", "进入菜单；1 一键全检，2 全部检测"],
       ["-A", "跳过菜单，直接一键全检"],
-      ["-A -d", "全部检测：一键全检加深度模式、Geekbench、分省测速与回程详情"],
+      ["-A -d", "全部检测：一键全检加深度模式、Geekbench、分省测速、全省回程与逐跳详情"],
       ["-H  -I  -N", "只测硬件与性能 / IP 质量 / 网络质量"],
       ["-d", "深度模式：硬盘 ATTO 表、回程每一跳的延迟"],
       ["-g", "Geekbench 6 跑分，结果会公开上传到 Geekbench 官网"],
@@ -104,6 +104,7 @@ const COPY: Record<Lang, Copy> = {
       ["-4  -6", "只检测 IPv4 或 IPv6 的 IP 质量"],
       ["-x PROXY", "检测代理的出口，例 socks5h://127.0.0.1:1080"],
       ["-S LIST", "跳过部分检测：bench,media,mail,dns,latency,route,speed"],
+      ["-R", "全省回程：31 省三网的回程线路 + 大包回程"],
       ["-P", "不生成结果页"],
       ["-j  -E  -n", "输出 JSON / 英文报告 / 不显示颜色"],
     ],
@@ -162,7 +163,7 @@ const COPY: Record<Lang, Copy> = {
       },
       {
         name: "Network quality", flag: "-N", time: "3–5 min",
-        items: ["NAT type (NAT1–4) and TCP settings", "BGP upstreams, peers and RPKI", "Latency to 31 provinces, IPv4 + IPv6", "CN2 GIA / 9929 / CMIN2, IPv4 + IPv6", "Speed to China, provinces (-p), abroad", "Latency to 36 sites on 6 continents"],
+        items: ["NAT type (NAT1–4) and TCP settings", "BGP upstreams, peers and RPKI", "Latency to 31 provinces, IPv4 + IPv6", "Routes for 31 provinces (-R), large packets", "Speed to China, provinces (-p), abroad", "Latency to 36 sites on 6 continents"],
       },
     ],
     optionsTitle: "Options",
@@ -170,7 +171,7 @@ const COPY: Record<Lang, Copy> = {
     options: [
       ["no options", "Open the menu: 1 full check-up, 2 all checks"],
       ["-A", "Skip the menu and run the full check-up"],
-      ["-A -d", "All checks: full check-up plus deep mode, Geekbench, provinces and hop-by-hop routes"],
+      ["-A -d", "All checks: full check-up plus deep mode, Geekbench, provincial speed, routes for all provinces and hop details"],
       ["-H  -I  -N", "Hardware / IP quality / network only"],
       ["-d", "Deep mode: ATTO table, latency per route hop"],
       ["-g", "Geekbench 6; results are uploaded publicly to Geekbench Browser"],
@@ -179,6 +180,7 @@ const COPY: Record<Lang, Copy> = {
       ["-4  -6", "IP quality for IPv4 or IPv6 only"],
       ["-x PROXY", "Check a proxy exit, e.g. socks5h://127.0.0.1:1080"],
       ["-S LIST", "Skip: bench,media,mail,dns,latency,route,speed"],
+      ["-R", "Return routes for all 31 provinces, large packets too"],
       ["-P", "Don't create a results page"],
       ["-j  -E  -n", "JSON output / English report / no colors"],
     ],
