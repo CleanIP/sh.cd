@@ -425,6 +425,8 @@ h3.sub { margin: 0 0 var(--space-3); font-size: var(--text-sm); font-weight: 600
 
 footer { margin-top: var(--space-12); border-top: 1px solid var(--color-neutral-200); }
 footer .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-6); padding-block: var(--space-6) var(--space-12); font-size: var(--text-sm); color: var(--color-neutral-500); }
+footer .copyright { display: inline-flex; align-items: center; gap: var(--space-2); }
+footer .copyright::before { content: ""; width: var(--space-3); height: var(--space-3); background: var(--color-primary); }
 footer .links { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); }
 footer a:hover { color: var(--color-neutral-900); }
 
@@ -632,7 +634,7 @@ export function landingPage(lang: Lang): string {
 
 <footer>
   <div class="wrap">
-    <span>sh.cd · MIT</span>
+    <span class="copyright">© ${new Date().getFullYear()} sh.cd · MIT</span>
     <div class="links">
       <a href="https://github.com/CleanIP/sh.cd">${t.footerSource}</a>
       <a href="${cleanip}">CleanIP.io</a>
