@@ -15,7 +15,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.6.2"
+VERSION="1.3.0"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'

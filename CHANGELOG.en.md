@@ -2,59 +2,6 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
-## v1.6.2 · 2026-09-18
-
-### Added
-
-- City latency: `-c` (included in all checks) measures 223 city-level nodes and lists median latency and loss per city, grouped by province
-
-## v1.6.1 · 2026-09-18
-
-### Added
-
-- CERNET return routes, measured together with the provincial routes: one university per province, IPv4 over CERNET and IPv6 over CERNET2, showing the last backbone before CERNET plus latency and loss
-- Menu option 8 runs bandwidth tests only — nearby, Chinese carriers, six regions abroad and provincial servers — without waiting for latency and routes
-
-## v1.6.0 · 2026-09-18
-
-### Added
-
-- Return routes for all provinces: menu option 7 or `-R` (included in all checks) identifies all 93 routes (31 provinces x Telecom / Unicom / Mobile), showing line, median latency and loss per cell; the previous three-city test stays as the quick option (menu 6)
-- Large-packet routes: the same targets are probed again with 1400-byte packets; a different line means large packets detour or get throttled
-- With IPv6, return routes over IPv6 also cover all 31 provinces; deep mode shows every hop with location, latency and ASN
-
-## v1.5.1 · 2026-09-18
-
-### Added
-
-- 5 more international latency sites, 36 in total: Helsinki, Moscow and Istanbul in Europe; San Jose and Seattle in North America
-
-## v1.5.0 · 2026-09-18
-
-### Added
-
-- International latency grows from 12 to 31 sites, grouped by continent: Asia 11 (new: Kuala Lumpur, Bangkok, Jakarta, Manila, Ho Chi Minh City, Mumbai), Middle East 3 (Dubai, Riyadh, Tel Aviv), Europe 6 (new: Madrid, Warsaw), Africa 3 (Johannesburg, Cairo, Casablanca), North America 4 (new: Dallas, Toronto), South America 2 (São Paulo, Santiago), Oceania 2 (new: Auckland)
-- International latency falls back to a backup server in the same city when the first one is unreachable
-
-### Fixed
-
-- China and international latency exclude DNS lookup time and measure only the TCP handshake; on machines without a DNS cache a lookup takes from a fraction of a second to over two seconds, which inflated latency and could be mistaken for a retransmit
-
-## v1.4.0 · 2026-09-18
-
-### Added
-
-- Results page: every run ends with a link like `https://sh.cd/results/…` (10-character id) showing the summary, hardware, IP, network and routes on separate tabs, with key facts for hardware, IP, routes to China and bandwidth at the top
-- One-click copy link, copy Markdown and download .md, plus copying a single section; `curl -s` on the same link prints the report in a terminal
-- IPs on the results page are masked to the first two parts like the terminal report; pages are not indexed and are kept for 365 days. `-P` skips the results page, and `-j` JSON output never creates one
-
-## v1.3.1 · 2026-09-18
-
-### Fixed
-
-- With the bash that ships with macOS, some terminals showed the CLEAN IP banner as garbled, uncolored characters; the ATTO and speed test progress lines had the same problem
-- Provincial speed table shows "-" where a province has no server for a carrier instead of a blank cell
-
 ## v1.3.0 · 2026-09-18
 
 ### Added
@@ -67,11 +14,25 @@ New features and fixes in each release, newest first. Versions match the script'
 - With IPv6, latency and return routes to the three Chinese carriers are also measured over IPv6; route details show IPv4 and IPv6 separately and the summary adds the IPv6 average
 - Speed tests to Chinese provinces with `-p` (included in all checks): three carriers in Beijing, Tianjin, Shanghai, Jiangsu, Zhejiang, Fujian, Hubei, Hunan and Sichuan; unreachable servers are marked
 - On bare metal, smartmontools and dmidecode are offered for install together with sysbench and fio
+- Results page: every run ends with a link like `https://sh.cd/results/…` (10-character id) showing the summary, hardware, IP, network and routes on separate tabs, with key facts for hardware, IP, routes to China and bandwidth at the top
+- One-click copy link, copy Markdown and download .md, plus copying a single section; `curl -s` on the same link prints the report in a terminal
+- IPs on the results page are masked to the first two parts like the terminal report; pages are not indexed and are kept for 365 days. `-P` skips the results page, and `-j` JSON output never creates one
+- International latency grows from 12 to 31 sites, grouped by continent: Asia 11 (new: Kuala Lumpur, Bangkok, Jakarta, Manila, Ho Chi Minh City, Mumbai), Middle East 3 (Dubai, Riyadh, Tel Aviv), Europe 6 (new: Madrid, Warsaw), Africa 3 (Johannesburg, Cairo, Casablanca), North America 4 (new: Dallas, Toronto), South America 2 (São Paulo, Santiago), Oceania 2 (new: Auckland)
+- International latency falls back to a backup server in the same city when the first one is unreachable
+- 5 more international latency sites, 36 in total: Helsinki, Moscow and Istanbul in Europe; San Jose and Seattle in North America
+- Return routes for all provinces: menu option 7 or `-R` (included in all checks) identifies all 93 routes (31 provinces x Telecom / Unicom / Mobile), showing line, median latency and loss per cell; the previous three-city test stays as the quick option (menu 6)
+- Large-packet routes: the same targets are probed again with 1400-byte packets; a different line means large packets detour or get throttled
+- With IPv6, return routes over IPv6 also cover all 31 provinces; deep mode shows every hop with location, latency and ASN
+- CERNET return routes, measured together with the provincial routes: one university per province, IPv4 over CERNET and IPv6 over CERNET2, showing the last backbone before CERNET plus latency and loss
+- Menu option 8 runs bandwidth tests only — nearby, Chinese carriers, six regions abroad and provincial servers — without waiting for latency and routes
+- City latency: `-c` (included in all checks) measures 223 city-level nodes and lists median latency and loss per city, grouped by province
 
 ### Fixed
 
 - Long latency lines in the summary wrap by display width instead of overflowing the report
-
+- With the bash that ships with macOS, some terminals showed the CLEAN IP banner as garbled, uncolored characters; the ATTO and speed test progress lines had the same problem
+- Provincial speed table shows "-" where a province has no server for a carrier instead of a blank cell
+- China and international latency exclude DNS lookup time and measure only the TCP handshake; on machines without a DNS cache a lookup takes from a fraction of a second to over two seconds, which inflated latency and could be mistaken for a retransmit
 ## v1.2.0 · 2026-09-17
 
 ### Added

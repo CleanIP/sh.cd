@@ -170,6 +170,8 @@ deploy/             systemd 服务、环境变量样例、发布脚本
 ```bash
 bun install           # 只装类型检查用的开发依赖
 bun run check         # 脚本语法 + 测试 + 类型检查
+bun run nodes:check   # 比对 Zstatic 的省级 / 市级节点清单有没有变
+bun run nodes:sync    # 清单变了就写回 server/render/cities.ts 与 check.sh
 bun run dev           # 本地起服务, 默认 127.0.0.1:3410
 SHCD_API=http://127.0.0.1:3410 bash check.sh -H    # 让脚本提交到本地服务
 SHCD_DUMP=1 bash check.sh -N                        # 只打印本机检测字段, 不提交
@@ -186,6 +188,8 @@ SHCD_DUMP=1 bash check.sh -N                        # 只打印本机检测字�
 3. `bun run check` 通过后运行 `deploy/deploy.sh`
 
 测试会核对：最新一段更新日志等于脚本版本、中英文两份的版本与日期一致，漏写日志发布脚本会停下。官网 https://sh.cd/changelog 直接读这两份文件。
+
+**一天一个版本号**：同一天多次发布就往同一段日志里加条目，不要一天排出好几个版本；当天最后合并成一个版本号（例如当天先发 1.3.1、1.3.2，收工时并成 1.3.0 那一段）。
 
 ## 许可
 
