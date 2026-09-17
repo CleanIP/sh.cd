@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRenderer, width } from "../server/render/base";
 import { parseHw, renderHw } from "../server/render/hw";
-import { parseNet, renderNet, renderRouteDetail } from "../server/render/net";
+import { INTL_GROUPS, parseNet, PLACES, renderNet, renderRouteDetail } from "../server/render/net";
 import { classifyRoute, hopAsn } from "../server/render/route";
 import { renderSummary } from "../server/render/summary";
 
@@ -144,5 +144,32 @@ describe("网络: NAT / IPv6 / 分省测速", () => {
     const lines = renderSummary(createRenderer("zh", false), { hw: null, ip: null, local: null, net: withSpeed, took: 60 });
     assertWidth(lines);
     expect(lines.join("\n")).toContain("IPv6 145 ms");
+  });
+});
+
+describe("国际延迟: 各大洲", () => {
+  // 每个点都给值, 含四位数延迟与超时, 看最宽的情况
+  const fields: Record<string, string> = {};
+  INTL_GROUPS.flatMap((g) => g.places).forEach((p, i) => { fields[`il_${p}`] = i === 3 ? "fail" : i === 5 ? "1324.0" : (10 + i * 11.3).toFixed(1); });
+  const net = parseNet(fields)!;
+
+  test("31 个点, 地名都有中英文", () => {
+    expect(net.intl).toHaveLength(31);
+    for (const x of net.intl) expect(PLACES[x.place]).toBeDefined();
+    expect(INTL_GROUPS.map((g) => g.name[0])).toEqual(["亚洲", "中东", "欧洲", "非洲", "北美", "南美", "大洋洲"]);
+  });
+
+  for (const lang of ["zh", "en"] as const) {
+    for (const color of [false, true]) {
+      test(`${lang} ${color ? "彩色" : "纯文本"} 不超过报告宽度`, () => assertWidth(renderNet(createRenderer(lang, color), net, null)));
+    }
+  }
+
+  test("按大洲分行, 每行 3 个", () => {
+    const zh = renderNet(createRenderer("zh", false), net, null).join("\n");
+    expect(zh).toMatch(/\n  亚洲\s+香港\s+10  台北\s+21  东京\s+33\n\s+首尔\s+×  新加坡\s+55  吉隆坡\s+1324\n/);
+    expect(zh).toMatch(/\n  非洲\s+约翰内斯堡\s+\d+  开罗\s+\d+  卡萨布兰卡\s+\d+\n/);
+    const en = renderNet(createRenderer("en", false), net, null).join("\n");
+    expect(en).toMatch(/\n  N\. America\s+Los Angeles\s+\d+  Dallas\s+\d+  New York\s+\d+\n\s+Toronto\s+\d+\n/);
   });
 });

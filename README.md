@@ -48,7 +48,7 @@ Geekbench 6（`-g`，全部检测默认包含）从 Geekbench 官方下载约 22
 | 三网回程线路 | 北京、上海、广州三网回程，识别 CN2 GIA / CN2 GT / 163 / CTGNET / 9929 / 4837 / CUG / CMIN2 / CMI；有 IPv6 时 IPv6 回程也测；菜单 6 或全部检测（菜单 2 / `-A -d`）看逐跳位置、延迟与 ASN |
 | 带宽测速 | 就近节点、国内电信 / 联通、中国移动香港，以及香港 / 东京 / 新加坡 / 洛杉矶 / 法兰克福 / 伦敦的上传下载 |
 | 分省测速 | `-p`（全部检测默认包含）：北京、天津、上海、江苏、浙江、福建、湖北、湖南、四川的三网节点 |
-| 国际延迟 | 香港、台北、首尔、东京、新加坡、悉尼、洛杉矶、纽约、法兰克福、阿姆斯特丹、伦敦、巴黎 |
+| 国际延迟 | 按大洲 31 个点：亚洲（香港、台北、东京、首尔、新加坡、吉隆坡、曼谷、雅加达、马尼拉、胡志明市、孟买）、中东（迪拜、利雅得、特拉维夫）、欧洲（伦敦、法兰克福、阿姆斯特丹、巴黎、马德里、华沙）、非洲（约翰内斯堡、开罗、卡萨布兰卡）、北美（洛杉矶、达拉斯、纽约、多伦多）、南美（圣保罗、圣地亚哥）、大洋洲（悉尼、奥克兰）；TCP 握手延迟，不含域名解析 |
 
 国内移动的测速节点全部不接受境外连接或对境外限速，所以移动用中国移动香港节点代替，报告里标明是香港。
 
@@ -137,7 +137,7 @@ IP 地址来自请求本身，只查询发起请求的出口 IP，不能指定�
 - 回程线路的骨干网段、IPv6 回程目标与网段清单、判定规则参考 [oneclickvirt/backtrace](https://github.com/oneclickvirt/backtrace)（Apache-2.0，网段清单见 `server/render/prefix/NOTICE`）
 - NAT 类型：按 RFC 3489 向公共 STUN 服务器探测
 - CPU 跑分：[Geekbench 6](https://www.geekbench.com)（`-g`，由 Primate Labs 提供，结果公开在 Geekbench Browser）
-- 测速节点来自 Speedtest 的公开节点，国内节点与分省节点清单参考 [spiritLHLS/speedtest.net-CN-ID](https://github.com/spiritLHLS/speedtest.net-CN-ID) 与 [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT），逐个实测后选用；国际节点为 GSL Networks
+- 测速节点来自 Speedtest 的公开节点，国内节点与分省节点清单参考 [spiritLHLS/speedtest.net-CN-ID](https://github.com/spiritLHLS/speedtest.net-CN-ID) 与 [spiritLHLS/speedtest.cn-CN-ID](https://github.com/spiritLHLS/speedtest.cn-CN-ID)（MIT），逐个实测后选用；国际测速节点为 GSL Networks，国际延迟节点优先 GSL Networks 等机房节点，当地没有时用当地主要运营商的 Speedtest 节点
 - 三网延迟节点：zstatic 公共测试节点
 - 更新日志：[CHANGELOG.md](CHANGELOG.md) · https://sh.cd/changelog
 

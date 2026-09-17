@@ -156,7 +156,8 @@ describe("网络质量", () => {
     expect(text).toContain("香港移动");
     expect(text).toMatch(/香港移动\s+571 Mbps\s+节点受限/);
     expect(text).not.toContain("暂无境外可用");
-    expect(text).toMatch(/洛杉矶\s+3 ms/);
+    expect(text).toMatch(/北美\s+洛杉矶\s+3\s+纽约\s+64\n/);
+    expect(text).toMatch(/\n\s+巴黎\s+×\n/);
   });
 });
 

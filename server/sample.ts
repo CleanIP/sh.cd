@@ -73,8 +73,12 @@ const NET_FIELDS = {
   sp_8: "intl|lax|940.1|921.6",
   sp_9: "intl|fra|444.9|494.3",
   sp_10: "intl|lon|556.2|526.8",
-  il_hk: "151.5", il_tpe: "134.3", il_sel: "134.6", il_tyo: "108.5", il_sgp: "175.6", il_syd: "160.7",
-  il_lax: "0.9", il_nyc: "63.6", il_fra: "147.7", il_ams: "141.9", il_lon: "132.7", il_par: "139.8",
+  // 国际延迟: 洛杉矶机 2026-09-18 实测的量级
+  il_hk: "146.3", il_tpe: "133.1", il_tyo: "102.9", il_sel: "133.5", il_sgp: "175.6", il_kul: "172.5", il_bkk: "196.2",
+  il_jkt: "177.1", il_mnl: "161.3", il_sgn: "194.9", il_bom: "231.2", il_dxb: "270.0", il_ruh: "238.7", il_tlv: "205.4",
+  il_lon: "127.9", il_fra: "164.3", il_ams: "163.0", il_par: "143.5", il_mad: "144.0", il_war: "163.2",
+  il_jnb: "310.6", il_cai: "209.5", il_cas: "193.6", il_lax: "1.3", il_dfw: "43.4", il_nyc: "61.7", il_yyz: "80.4",
+  il_gru: "205.1", il_scl: "197.5", il_syd: "176.1", il_akl: "279.1",
   dur: "168",
 }
 

@@ -2,6 +2,17 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.5.0 · 2026-09-18
+
+### Added
+
+- International latency grows from 12 to 31 sites, grouped by continent: Asia 11 (new: Kuala Lumpur, Bangkok, Jakarta, Manila, Ho Chi Minh City, Mumbai), Middle East 3 (Dubai, Riyadh, Tel Aviv), Europe 6 (new: Madrid, Warsaw), Africa 3 (Johannesburg, Cairo, Casablanca), North America 4 (new: Dallas, Toronto), South America 2 (São Paulo, Santiago), Oceania 2 (new: Auckland)
+- International latency falls back to a backup server in the same city when the first one is unreachable
+
+### Fixed
+
+- China and international latency exclude DNS lookup time and measure only the TCP handshake; on machines without a DNS cache a lookup takes from a fraction of a second to over two seconds, which inflated latency and could be mistaken for a retransmit
+
 ## v1.4.0 · 2026-09-18
 
 ### Added

@@ -8,13 +8,32 @@ import { fit, fmtMbps, median, num, rowsFlex, rtrim, rttSamples, spark, str, tex
 
 const CARRIERS = ["ct", "cu", "cm"] as const
 
+// 地名最长 11 列 (国际延迟每格地名 11 列), 英文放不下的用通行简称
 export const PLACES: Record<string, Pair> = {
-  sh: ["上海", "Shanghai"], js: ["南京", "Nanjing"], bj: ["北京", "Beijing"], hk: ["香港", "Hong Kong"],
-  tpe: ["台北", "Taipei"], sel: ["首尔", "Seoul"], tyo: ["东京", "Tokyo"], sgp: ["新加坡", "Singapore"],
-  syd: ["悉尼", "Sydney"], lax: ["洛杉矶", "Los Angeles"], nyc: ["纽约", "New York"], fra: ["法兰克福", "Frankfurt"],
-  ams: ["阿姆斯特丹", "Amsterdam"], lon: ["伦敦", "London"], par: ["巴黎", "Paris"],
+  sh: ["上海", "Shanghai"], js: ["南京", "Nanjing"], bj: ["北京", "Beijing"],
+  hk: ["香港", "Hong Kong"], tpe: ["台北", "Taipei"], tyo: ["东京", "Tokyo"], sel: ["首尔", "Seoul"],
+  sgp: ["新加坡", "Singapore"], kul: ["吉隆坡", "K. Lumpur"], bkk: ["曼谷", "Bangkok"], jkt: ["雅加达", "Jakarta"],
+  mnl: ["马尼拉", "Manila"], sgn: ["胡志明市", "Ho Chi Minh"], bom: ["孟买", "Mumbai"],
+  dxb: ["迪拜", "Dubai"], ruh: ["利雅得", "Riyadh"], tlv: ["特拉维夫", "Tel Aviv"],
+  lon: ["伦敦", "London"], fra: ["法兰克福", "Frankfurt"], ams: ["阿姆斯特丹", "Amsterdam"], par: ["巴黎", "Paris"],
+  mad: ["马德里", "Madrid"], war: ["华沙", "Warsaw"],
+  jnb: ["约翰内斯堡", "Jo'burg"], cai: ["开罗", "Cairo"], cas: ["卡萨布兰卡", "Casablanca"],
+  lax: ["洛杉矶", "Los Angeles"], dfw: ["达拉斯", "Dallas"], nyc: ["纽约", "New York"], yyz: ["多伦多", "Toronto"],
+  gru: ["圣保罗", "São Paulo"], scl: ["圣地亚哥", "Santiago"],
+  syd: ["悉尼", "Sydney"], akl: ["奥克兰", "Auckland"],
 }
-const INTL_ORDER = ["hk", "tpe", "sel", "tyo", "sgp", "syd", "lax", "nyc", "fra", "ams", "lon", "par"]
+
+/** 国际延迟按大洲分组 (顺序即报告顺序); 大洲名最长 10 列, 要和地名之间留空 */
+export const INTL_GROUPS: Array<{ name: Pair, places: string[] }> = [
+  { name: ["亚洲", "Asia"], places: ["hk", "tpe", "tyo", "sel", "sgp", "kul", "bkk", "jkt", "mnl", "sgn", "bom"] },
+  { name: ["中东", "M. East"], places: ["dxb", "ruh", "tlv"] },
+  { name: ["欧洲", "Europe"], places: ["lon", "fra", "ams", "par", "mad", "war"] },
+  { name: ["非洲", "Africa"], places: ["jnb", "cai", "cas"] },
+  { name: ["北美", "N. America"], places: ["lax", "dfw", "nyc", "yyz"] },
+  { name: ["南美", "S. America"], places: ["gru", "scl"] },
+  { name: ["大洋洲", "Oceania"], places: ["syd", "akl"] },
+]
+const INTL_ORDER = INTL_GROUPS.flatMap((g) => g.places)
 
 export type NatKind = "open" | "firewall" | "full_cone" | "restricted" | "port_restricted" | "symmetric" | "nat" | "blocked" | "fail"
 
@@ -188,6 +207,7 @@ const T = {
   speedStall: ["节点受限", "Throttled"],
   noNode: ["暂无境外可用的测速节点", "No test server reachable from abroad"],
   intl: ["国际延迟", "International latency"],
+  intlNote: ["TCP 握手 ms, × 为超时", "TCP handshake ms, × = timeout"],
   detail: ["回程路由详情", "Hop-by-hop return routes"],
   private: ["内网", "private"],
 } satisfies Record<string, Pair>
@@ -399,14 +419,17 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   // —— 国际延迟 ——
   if (net.intl.length) {
     title(T.intl)
-    // 每格: 地名 11 列 + 延迟 7 列, 格间空 3 列
-    for (let i = 0; i < net.intl.length; i += 3) {
-      const line = net.intl.slice(i, i + 3).map((x) => {
+    out.push(`  ${paint(L(T.intlNote), "gray")}`)
+    // 每行: 大洲 11 列 + 3 格 (地名 11 列 + 延迟 4 列), 格间空 2 列, 共 62 列
+    for (const group of INTL_GROUPS) {
+      const cells = group.places.flatMap((place) => net.intl.filter((x) => x.place === place)).map((x) => {
         const name = fit(PLACES[x.place]![zh ? 0 : 1], 11)
-        const ms = x.ms === null ? tonePaint(padL(zh ? "超时" : "timeout", 7), "bad") : tonePaint(padL(`${Math.round(x.ms)} ms`, 7), x.ms < 50 ? "good" : x.ms < 200 ? "neutral" : "warn")
+        const ms = x.ms === null ? tonePaint(padL("×", 4), "bad") : tonePaint(padL(String(Math.round(x.ms)), 4), x.ms < 50 ? "good" : x.ms < 200 ? "neutral" : "warn")
         return pad(name, 11) + ms
-      }).join("   ")
-      out.push(`  ${line}`)
+      })
+      for (let i = 0; i < cells.length; i += 3) {
+        out.push(`  ${paint(pad(i ? "" : L(group.name), 11), "gray")}${cells.slice(i, i + 3).join("  ")}`)
+      }
     }
     out.push(hr())
   }

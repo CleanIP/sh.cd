@@ -15,7 +15,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.4.0"
+VERSION="1.5.0"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -219,8 +219,12 @@ with_timeout() {
 }
 
 # 按 TCP 建连耗时量延迟 (秒)
+# TCP 建连耗时 (秒), 扣掉 DNS 解析; 连不上输出 0。
+# time_connect 从请求开始算, 含域名解析: 不缓存 DNS 的机器每次都要重新解析, 2026-09-18 香港机并发解析一次 0.4–2.4 秒,
+# 不扣掉会把延迟算高, 解析超过 1 秒还会被当成 SYN 重传。超时放宽到 3 秒也是为了给慢解析留时间。
 connect_time() {
-	ccurl -s -o /dev/null -m 3 --connect-timeout 2 -w '%{time_connect}' "http://$1:$2/" 2>/dev/null
+	ccurl -s -o /dev/null -m 4 --connect-timeout 3 -w '%{time_namelookup} %{time_connect}' "http://$1:$2/" 2>/dev/null |
+		awk '{ v = $2 - $1; printf "%.6f", ($2 > 0 && v > 0) ? v : 0 }'
 }
 positive() { awk -v v="$1" 'BEGIN { exit !(v + 0 > 0) }'; }
 
@@ -1360,8 +1364,43 @@ lax|intl|lax|la2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080
 fra|intl|fra|fr5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080
 lon|intl|lon|thn.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net:8080'
 
-# 国际延迟节点 (GSL Networks, 东京备用 Verizon): 地点代码:主机[|备用主机]
-INTL_NODES="hk:hk1.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net tpe:tpe.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net sel:seoul.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net tyo:ty8.speedtest.gslnetworks.com|jp-nperf.verizon.net.prod.hosts.ooklaserver.net sgp:sg3.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net syd:sy5.test.gslnetworks.com.au lax:la2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net nyc:ny2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net fra:fr5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net ams:am5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net lon:thn.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net par:par.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net"
+# 国际延迟节点: 地点代码:主机[|备用主机], 都是 Speedtest 公开节点 (8080 端口), 主机连不上才测备用。
+# 覆盖各大洲: 亚洲 11 · 中东 3 · 欧洲 6 · 非洲 3 · 北美 4 · 南美 2 · 大洋洲 2。优先机房 / 骨干网节点 (GSL Networks 等),
+# 当地没有时用当地主要运营商; 2026-09-18 在洛杉矶、香港与本地逐个实测都能连上、延迟与地理位置相符后选用。
+# 不用 Misaka 约翰内斯堡 (洛杉矶连它每次 SYN 重传, 1.3 秒)、Etisalat Misr 开罗 (香港 460ms 绕路)、Freshtel 吉隆坡 (香港绕路 180ms)。
+INTL_NODES="
+hk:hk1.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net|hk-hkg12.speed.misaka.one
+tpe:tpe.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+tyo:ty8.speedtest.gslnetworks.com|jp-nperf.verizon.net.prod.hosts.ooklaserver.net
+sel:seoul.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+sgp:sg3.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+kul:speedtestkul.u.net.my|speedkl.time.com.my.prod.hosts.ooklaserver.net
+bkk:speedtest.siamcolo.net.prod.hosts.ooklaserver.net|sp1.uih.cloud.prod.hosts.ooklaserver.net
+jkt:speedtest.cbn.id|speedtest.indosatooredoo.com.prod.hosts.ooklaserver.net
+mnl:mnl-speedtest.globe.com.ph.prod.hosts.ooklaserver.net|speedtest2.infinivan.services
+sgn:speedtestkv3b.viettel.vn|speedtest.hqg.vn
+bom:mumbooklaspeed1.jioconnect.com.prod.hosts.ooklaserver.net|speedtestmh.airtelbroadband.in.prod.hosts.ooklaserver.net
+dxb:speedtest1.etisalat.ae|dxbsouth.speedtest.du.ae.prod.hosts.ooklaserver.net
+ruh:speedtest.saudi.net.sa|speedtest-riyadhnew.sa.zain.com.prod.hosts.ooklaserver.net
+tlv:speedtest.il-ta.kamatera.com.prod.hosts.ooklaserver.net|fibertest.bezeq.co.il
+lon:thn.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+fra:fr5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+ams:am5.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+par:par.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+mad:mad.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+war:war.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+jnb:zatjnb01-ookla1.syrex.co.za.prod.hosts.ooklaserver.net|jhbspeed.rain.co.za
+cai:speedtest12.vodafone.com.eg.prod.hosts.ooklaserver.net|speedtestob.orange.eg.prod.hosts.ooklaserver.net
+cas:casablancast.iam.ma.prod.hosts.ooklaserver.net|speedtestcasa3.meditel.net.ma.prod.hosts.ooklaserver.net
+lax:la2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+dfw:dal.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+nyc:ny2.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+yyz:sttoronto.rogers.com|wirelinespeedtesttoronto.srvr.bell.ca.prod.hosts.ooklaserver.net
+gru:gru-eqx4-ookla-1.99.network.prod.hosts.ooklaserver.net|saopaulo.speedtest.ciriontechnologies.com
+scl:speedtest1.entelchile.net|nacional.grupogtd.com
+syd:sy5.test.gslnetworks.com.au
+akl:akl.speedtest.gslnetworks.com.prod.hosts.ooklaserver.net
+"
 
 dd_bytes_secs() {
 	# 从 dd 的统计输出取每一次的 "字节数 秒数"
@@ -1531,7 +1570,7 @@ EOF
 }
 
 run_intl_latency() {
-	local d="$1" item
+	local d="$1" item n=0
 	mkdir -p "$d/intl"
 	for item in $INTL_NODES; do
 		(
@@ -1547,6 +1586,9 @@ run_intl_latency() {
 			done
 			put "$d/intl" "il_${item%%:*}" "$([ -n "$best" ] && awk -v v="$best" 'BEGIN { printf "%.1f", v * 1000 }' || echo fail)"
 		) &
+		# 分两批并发: 31 个节点同时解析域名, 慢的 DNS 会拖到超时
+		n=$((n + 1))
+		[ $((n % 16)) = 0 ] && wait
 	done
 	wait
 }
