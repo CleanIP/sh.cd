@@ -33,11 +33,13 @@ export interface Reply {
   body: string
 }
 
+const SEC = { "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" }
+
 const text = (status: number, body: string, headers: Record<string, string> = {}): Reply =>
-  ({ status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers }, body })
+  ({ status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...SEC, ...headers }, body })
 
 const json = (value: unknown): Reply =>
-  ({ status: 200, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }, body: JSON.stringify(value) })
+  ({ status: 200, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...SEC }, body: JSON.stringify(value) })
 
 const STAGES = ["hw", "ip", "net", "route", "summary"] as const
 
@@ -63,7 +65,7 @@ export async function handleReport(body: Form, caller: string): Promise<Reply> {
   }
 
   // 每次运行只在第一次提交时计一次 (一次全检会提交好几次)
-  const hits = one("seq") === "1" ? recordHit() : hitStats()
+  const hits = one("seq") === "1" ? await recordHit() : hitStats()
   const dur = /^\d{1,5}$/.test(one("dur") || "") ? Number(one("dur")) : null
   const single = one("stages") === "1"
 

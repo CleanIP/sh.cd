@@ -15,7 +15,7 @@
 #
 # 源码: https://github.com/CleanIP/sh.cd    许可: MIT
 
-VERSION="1.3.0"
+VERSION="1.3.3"
 API="${SHCD_API:-https://sh.cd}"
 
 UA_BROWSER='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
@@ -37,6 +37,7 @@ GEEKBENCH=0
 CN_SPEED=0
 ROUTE_FULL=0
 CITY_LAT=0
+ROUTE_REUSED=0
 VIRT=""
 STAGES=""
 SKIP=","
@@ -132,7 +133,7 @@ while getopts ":HINAdgpRcy46x:i:asS:jPnl:Ehv" opt; do
 	x) PROXY="$OPTARG" ;;
 	i) IFACE="$OPTARG" ;;
 	a | s) ;;
-	S) SKIP=",$OPTARG," ;;
+	S) SKIP="$SKIP$OPTARG," ;;
 	j) JSON=1 ;;
 	P) PRIVATE=1 ;;
 	n) OPT_NOCOLOR=1 ;;
@@ -181,7 +182,9 @@ IS_LINUX=0
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t shcd)
 BENCH_FILE=""
 cleanup() {
-	jobs -p 2>/dev/null | xargs kill -9 2>/dev/null
+	# shellcheck disable=SC2086
+	pids=$(jobs -p 2>/dev/null)
+	[ -n "$pids" ] && kill -9 $pids 2>/dev/null
 	[ -n "$BENCH_FILE" ] && rm -f "$BENCH_FILE" 2>/dev/null
 	[ -n "$GB_DIR" ] && rm -rf "$GB_DIR" 2>/dev/null
 	rm -rf "$TMP"
@@ -245,9 +248,10 @@ positive() { awk -v v="$1" 'BEGIN { exit !(v + 0 > 0) }'; }
 #   hw_os=系统|内核|架构   hw_virt=虚拟化代码   hw_uptime=秒|负载   hw_procs=进程|登录用户|运行服务|全部服务
 #   hw_tz=时区|UTC偏移|区域设置   hw_board=厂商|型号|BIOS厂商|BIOS版本   hw_chipset / hw_nic / hw_gpu=名称;名称
 #   hw_cpu=型号|核心|线程|插槽|MHz|占用%   hw_cache=L1d|L1i|L2|L3   hw_flags=aes,avx2,...
+#   hw_csteal=宿主偷用%|IO等待% (Linux /proc 两次采样, 非 Linux 不报)   hw_ntp=时钟偏移毫秒|chrony (无 chrony 时不报)
 #   hw_mem=总|已用|可用|Swap总|Swap已用 (字节)   hw_overcommit=balloon,ksm|KSM 是否可用
 #   hw_disk=块设备数|总容量|测试分区容量|已用|可用|设备名|ssd/hdd
-#   bn_cpu=工具|单线程|多线程|线程数   bn_mem=工具|读|写   bn_r4q1 / bn_r4q32 / bn_s1q1 / bn_s1q8=读KiB/s|读IOPS|写KiB/s|写IOPS
+#   bn_cpu=工具|单线程|多线程|线程数   bn_mem=工具|读|写   bn_r4q1 / bn_r4q32 / bn_s1q1 / bn_s1q8=读KiB/s|读IOPS|读p99微秒|写KiB/s|写IOPS|写p99微秒 (ATTO 同格式)
 #   bn_atto_<块大小>=同上 (-d)   bn_dd=顺序写字节/秒|顺序读字节/秒|4K同步写IOPS (没有 fio 时)
 #   hw_temp=cpu:52.0,nvme:41.0,…   sm_* / mm_* 物理机硬盘 SMART 与内存条 (见 hw_collect_physical)   bn_gb Geekbench (-g)
 
@@ -295,6 +299,18 @@ cpu_usage() {
 		if (NR == 1) { i1 = idle; t1 = tot } else if (tot > t1) printf "%.0f", (1 - (idle - i1) / (tot - t1)) * 100 }'
 }
 
+# 宿主偷用 (steal) 与 IO 等待占比: /proc/stat 第一行第 9 列是 steal、第 6 列是 iowait, 都是累计值, 同样采两次算差值。
+# 虚拟机看超售主要看这一项, 输出 steal%|iowait% (取整)
+cpu_steal() {
+	[ -r /proc/stat ] || return 0
+	local a b
+	a=$(head -n1 /proc/stat)
+	sleep 0.5
+	b=$(head -n1 /proc/stat)
+	printf '%s\n%s\n' "$a" "$b" | awk '{ st = $9; io = $6; tot = 0; for (i = 2; i <= NF; i++) tot += $i
+		if (NR == 1) { s1 = st; w1 = io; t1 = tot } else if (tot > t1) printf "%d|%d", (st - s1) / (tot - t1) * 100, (io - w1) / (tot - t1) * 100 }'
+}
+
 # 跑分目录: 当前目录、家目录等里第一个可写且不是内存盘的
 bench_dir() {
 	local dir fs
@@ -308,7 +324,7 @@ bench_dir() {
 }
 
 hw_collect() {
-	local d="$1" os kernel arch up load procs users sa="" st="" tz dmi=/sys/class/dmi/id pci
+	local d="$1" os kernel arch up load procs users sa="" st="" tz dmi=/sys/class/dmi/id pci ntp_off
 	mkdir -p "$d"
 
 	arch=$(uname -m)
@@ -346,6 +362,9 @@ hw_collect() {
 	[ -z "$tz" ] && [ -L /etc/localtime ] && tz=$(readlink /etc/localtime | sed 's#.*zoneinfo/##')
 	[ -z "$tz" ] && [ -r /etc/timezone ] && tz=$(cat /etc/timezone)
 	put "$d" hw_tz "$(clean "${tz:-$(date +%Z)}")|$(date +%z)|$(clean "${LC_ALL:-${LANG:-C}}")"
+	# 时钟偏移 (毫秒, local 落后为负): 只读 chronyd, 不发包, 没有 chrony 时不报
+	ntp_off=$(chronyc tracking 2>/dev/null | awk '/slow of NTP time/ { printf "-%.0f", $4 * 1000 } /fast of NTP time/ { printf "%.0f", $4 * 1000 }')
+	[ -n "$ntp_off" ] && put "$d" hw_ntp "$ntp_off|chrony"
 
 	put "$d" hw_board "$(clean "$(cat $dmi/sys_vendor 2>/dev/null)")|$(clean "$(cat $dmi/product_name 2>/dev/null)")|$(clean "$(cat $dmi/bios_vendor 2>/dev/null)")|$(clean "$(cat $dmi/bios_version 2>/dev/null)")"
 	if command -v lspci >/dev/null 2>&1; then
@@ -363,7 +382,7 @@ hw_collect() {
 }
 
 hw_collect_cpu() {
-	local d="$1" info model threads sockets per cores mhz flags="" fl x
+	local d="$1" info model threads sockets per cores mhz flags="" fl x s
 	info=$(LC_ALL=C lscpu 2>/dev/null)
 	lv() { printf '%s\n' "$info" | sed -n "s/^$1:[[:space:]]*//p" | head -n1; }
 	model=$(lv 'Model name')
@@ -378,6 +397,8 @@ hw_collect_cpu() {
 	[ -z "$mhz" ] && mhz=$(grep -m1 'cpu MHz' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | tr -d ' ')
 	[ -z "$mhz" ] && mhz=$(lv 'CPU max MHz')
 	put "$d" hw_cpu "$(clean "$model")|$cores|$threads|${sockets:-1}|${mhz%%.*}|$(cpu_usage)"
+	s=$(cpu_steal)
+	[ -n "$s" ] && put "$d" hw_csteal "$s"
 	# 新版 lscpu 给的是所有实例的合计, 例 "512 KiB (16 instances)"; 原样交上去, 报告里换算成每个实例
 	put "$d" hw_cache "$(clean "$(lv 'L1d cache')")|$(clean "$(lv 'L1i cache')")|$(clean "$(lv 'L2 cache')")|$(clean "$(lv 'L3 cache')")"
 	fl=" $(grep -m1 -E '^(flags|Features)' /proc/cpuinfo 2>/dev/null | cut -d: -f2) $(sysctl -n machdep.cpu.features machdep.cpu.leaf7_features 2>/dev/null | tr 'A-Z.' 'a-z_' | tr '\n' ' ') "
@@ -623,15 +644,17 @@ ensure_bench_tools() {
 
 FIO_ENGINE=psync
 
-# 输出 读KiB/s|读IOPS 或 写KiB/s|写IOPS (fio terse v3: 读在第 7/8 列, 写在第 48/49 列)
+# 输出 读KiB/s|读IOPS|读p99微秒 或 写KiB/s|写IOPS|写p99微秒。
+# 带宽与 IOPS 在 terse v3 固定列 (读 7/8, 写 48/49); p99 按名取 ("99.00%=123" 这类字段, 取微秒值),
+# 不依赖列号: 不同 fio 版本的百分位集合可能不一样, 按列数死取会错位。取不到就留空, 报告里跳过。
 fio_run() {
 	local rw="$1" bs="$2" depth="$3" secs="$4" out
 	out=$(cd "$BENCH_DIR" && with_timeout $((secs + 60)) fio --name=shcd --filename=.shcd-fio --size=512M --direct=1 \
 		--rw="$rw" --bs="$bs" --iodepth="$depth" --ioengine="$FIO_ENGINE" --runtime="$secs" --time_based \
 		--group_reporting --output-format=terse --terse-version=3 2>/dev/null | tail -n1)
 	case "$rw" in
-	*read) printf '%s' "$out" | awk -F';' '{ printf "%s|%s", $7, $8 }' ;;
-	*) printf '%s' "$out" | awk -F';' '{ printf "%s|%s", $48, $49 }' ;;
+	*read) printf '%s' "$out" | awk -F';' '{ p = ""; for (i = 18; i <= 37 && p == ""; i++) if ($i ~ /^99(\.0+)?%=/) { p = $i; sub(/^[^=]*=/, "", p) } printf "%s|%s|%s", $7, $8, p }' ;;
+	*) printf '%s' "$out" | awk -F';' '{ p = ""; for (i = 59; i <= 78 && p == ""; i++) if ($i ~ /^99(\.0+)?%=/) { p = $i; sub(/^[^=]*=/, "", p) } printf "%s|%s|%s", $48, $49, p }' ;;
 	esac
 }
 
@@ -928,12 +951,13 @@ run_media() {
 # ── 邮件: 各大邮箱 MX 的 25 端口握手 ─────────────────────────────────────
 # 用 bash 的 /dev/tcp 读 SMTP 欢迎语 (220 开头); 自己计时杀进程, 因为 macOS 没有 timeout 命令。
 # /dev/tcp 走系统默认出口, 无法绑定网卡也不能走代理, 所以 -x / -i 模式下跳过。
+# 25 不通时再试 587 提交端口, 通则记 mail_<名>_587=ok (只记通的): 区分服务商封 25 还是真的不可达。
 
 # 输出 ok (220 欢迎语) | reject (连上了但回 4xx/5xx, 多为对方按 IP 信誉拒收) | fail (连不上或 10 秒内没有欢迎语)
 smtp_banner() {
-	local host="$1" out="$2" i=0 pid
+	local host="$1" out="$2" port="${3:-25}" i=0 pid
 	rm -f "$out"
-	(exec 3<>"/dev/tcp/$host/25" && IFS= read -r line <&3 && printf '%s' "$line" >"$out") 2>/dev/null &
+	(exec 3<>"/dev/tcp/$host/$port" && IFS= read -r line <&3 && printf '%s' "$line" >"$out") 2>/dev/null &
 	pid=$!
 	# 欢迎语慢的邮局要好几秒 (新浪实测 2.9 秒), 12 家并发时更慢, 等 10 秒
 	while kill -0 "$pid" 2>/dev/null && [ $i -lt 100 ]; do
@@ -954,7 +978,7 @@ smtp_banner() {
 MAIL_HOSTS="gmail:gmail-smtp-in.l.google.com outlook:outlook-com.olc.protection.outlook.com yahoo:mta5.am0.yahoodns.net icloud:mx01.mail.icloud.com qq:mx1.qq.com 163:163mx01.mxmail.netease.com mailru:mxs.mail.ru aol:mx-aol.mail.gm0.yahoodns.net gmx:mx00.gmx.net mailcom:mx00.mail.com sohu:sohumx.h.a.sohu.com sina:freemx1.sinamail.sina.com.cn"
 
 run_mail() {
-	local d="$1" item
+	local d="$1" item r a
 	mkdir -p "$d/mail"
 	for item in $MAIL_HOSTS; do
 		(
@@ -966,6 +990,11 @@ run_mail() {
 				r=$(smtp_banner "${item#*:}" "$d/mail/banner_${item%%:*}" 2>/dev/null)
 			fi
 			put "$d/mail" "mail_${item%%:*}" "$r"
+			# 25 不通时试一次 587: 通说明只是服务商封 25, 发信走提交端口仍可用
+			if [ "$r" = fail ]; then
+				a=$(smtp_banner "${item#*:}" "$d/mail/banner_${item%%:*}_587" 587 2>/dev/null)
+				[ "$a" = ok ] && put "$d/mail" "mail_${item%%:*}_587" ok
+			fi
 		) &
 	done
 	wait
@@ -1035,16 +1064,16 @@ stage_ip_exit() {
 # ════════════════════════════════════════════════════════════════════════
 # 字段:
 #   nt_nat=<open|firewall|full_cone|restricted|port_restricted|symmetric|nat|blocked>|公网IP 或 fail
-#   nt_tcp=拥塞控制|队列|rmem|wmem   nt_v6=yes|no
-#   lat_<省>_<ct|cu|cm>=5 次采样毫秒 (0 = 丢包), 逗号分隔
+#   nt_tcp=拥塞控制|队列|rmem|wmem   nt_v6=yes|no   nt_dns=域名解析毫秒 (单次, 延迟统计已剔除解析时间)   nt_tls=TLS握手毫秒 (单次, 到 sh.cd 本身)
+#   lat_<省>_<ct|cu|cm>=10 次采样毫秒 (0 = 丢包), 逗号分隔
 #   rt_<bj|sh|gd>_<ct|cu|cm>=TTL:IP,…  (深度模式 TTL:IP:毫秒)   一跳都没回应为 none
 #   lat6_* / rt6_*=同上的 IPv6 版本, rt6 用斜杠分隔: TTL/IP[/毫秒] (有 IPv6 时才测)
 #   sp_<n>=<ct|cu|cm|intl|near>|<地点代码或城市名>|下载Mbps|上传Mbps  (fail = 连不上, stall = 节点不收发)
-#   il_<地点代码>=毫秒 或 fail
+#   il_<地点代码>=中位数毫秒|丢包数 (10 次采样) 或 fail
 #   spc_<省>_<ct|cu|cm>=城市|下载Mbps|上传Mbps 或 fail   分省测速 (-p)
 #   rt_<省>_<运营商>=TTL:IP[:毫秒],…  回程逐跳 (全省模式是 31 省 × 三网)   rtl_* 大包回程   rt6_* IPv6
 #   rte_<省> / rte6_<省>=教育网回程逐跳   late_<省> / late6_<省>=到教育网节点的握手毫秒
-#   latc_<省>_<城市>_<运营商>=毫秒,… (5 次)   市级延迟 (-c)
+#   latc_<省>_<城市>_<运营商>=毫秒,… (10 次)   市级延迟 (-c)
 
 # ── 本地网络策略: NAT 类型 (纯 bash 发 STUN 请求)、TCP 拥塞控制与缓冲区 ──
 # bash 的 UDP 连接每次换源端口, 无法用同一端口问两台 STUN 服务器, 所以只区分「公网直连」与「在 NAT 后」。
@@ -1073,7 +1102,7 @@ stun_mapped() {
 }
 
 net_local() {
-	local d="$1" mapped="" s local_ips cc qd rm wm v6 nat
+	local d="$1" mapped="" s local_ips cc qd rm wm v6 nat dns_tls dnsms tlsms
 	# NAT 类型: 有 python3 就按 RFC 3489 细分 (全锥 / 限制锥 / 端口限制锥 / 对称), 没有就用纯 bash 只分公网直连 / NAT 后
 	nat=$(nat_type)
 	if [ -n "$nat" ]; then
@@ -1097,9 +1126,15 @@ net_local() {
 		put "$d" nt_tcp "$(clean "$cc")|$(clean "$qd")|$(clean "$rm")|$(clean "$wm")"
 	fi
 	v6=no
-	[ -n "$(curl -6 -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ] && v6=yes
+	[ -n "$(curl ${IFACE:+--interface "$IFACE"} -6 -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ] && v6=yes
 	NET_V6=$v6
 	put "$d" nt_v6 "$v6"
+	# DNS 解析耗时 (毫秒, 单次): 延迟统计刻意剔除了域名解析, 这里单独报一项; 慢解析 (>1s) 的机器延迟读数会被拖高
+	# TLS 握手耗时 (毫秒, 单次, 到 sh.cd 本身): 区分连得慢还是握手慢, 非 HTTPS/失败时不报
+	dns_tls=$(curl ${IFACE:+--interface "$IFACE"} -s -o /dev/null -m 8 -w '%{time_namelookup} %{time_appconnect}' "$API/" 2>/dev/null | awk '{ printf "%.0f %.0f", $1 * 1000, $2 * 1000 }')
+	dnsms=${dns_tls%% *}; tlsms=${dns_tls##* }
+	[ "${dnsms:-0}" -gt 0 ] 2>/dev/null && put "$d" nt_dns "$dnsms"
+	[ "${tlsms:-0}" -gt 0 ] 2>/dev/null && put "$d" nt_tls "$tlsms"
 }
 
 # NAT 类型 (RFC 3489 经典分类), 输出 类型|公网映射 IP:
@@ -1206,7 +1241,7 @@ else:
         print("port_restricted|" + mapped[0])
 '
 
-# ── 三网延迟: 全国 31 省 × 电信 / 联通 / 移动, TCP 握手, 每节点 5 次 ──────────────
+# ── 三网延迟: 全国 31 省 × 电信 / 联通 / 移动, TCP 握手, 每节点 10 次 ──────────────
 # 节点与 CleanIP 后台三网监测相同: <省>-<ct|cu|cm>-dualstack.ip.zstaticcdn.com。
 # 只量 curl 的 time_connect (TCP 建连耗时), 不依赖 ping —— 很多机器禁 ICMP 或没有 ping 权限。
 # 优先测 80 端口: 北京联通节点的 443 会丢掉第一个 SYN, 每次都多出 1 秒重传
@@ -1217,7 +1252,8 @@ PROVINCES="bj tj he sx nm ln jl hl sh js zj ah fj jx sd ha hb hn gd gx hi cq sc 
 lat_node() {
 	local host="$1" i s out="" port=80
 	positive "$(connect_time "$host" 80)" || port=443
-	for i in 1 2 3 4 5; do
+	# 10 次采样 (mtr 默认同级): 中位数稳定, 丢包率到 10% 一档; 超时记 0
+	for i in $(seq 1 10); do
 		s=$(connect_time "$host" "$port")
 		if positive "$s"; then out="$out,$(awk -v v="$s" 'BEGIN { printf "%.1f", v * 1000 }')"; else out="$out,0"; fi
 	done
@@ -1970,17 +2006,23 @@ run_intl_latency() {
 	mkdir -p "$d/intl"
 	for item in $INTL_NODES; do
 		(
-			best=""
+			# 每点 10 次取中位数 + 丢包数 (与三网同口径, 落盘行的分母恒为 10); 主机 3 连败且一次没通就换备用
+			vals=""; fails=0
 			for host in $(printf '%s' "${item#*:}" | tr '|' ' '); do
-				for i in 1 2 3 4; do
-					# 前 3 次都失败才补第 4 次, 间隔 1 秒
-					[ $i = 4 ] && { [ -n "$best" ] && break; sleep 1; }
+				vals=""; fails=0; consec=0
+				for i in $(seq 1 10); do
 					s=$(connect_time "$host" 8080)
-					if positive "$s" && { [ -z "$best" ] || awk -v a="$s" -v b="$best" 'BEGIN { exit !(a < b) }'; }; then best=$s; fi
+					if positive "$s"; then vals="$vals $s"; consec=0
+					else fails=$((fails + 1)); consec=$((consec + 1)); fi
+					[ "$consec" -ge 3 ] && [ -z "$vals" ] && break
 				done
-				[ -n "$best" ] && break
+				[ -n "$vals" ] && break
 			done
-			put "$d/intl" "il_${item%%:*}" "$([ -n "$best" ] && awk -v v="$best" 'BEGIN { printf "%.1f", v * 1000 }' || echo fail)"
+			if [ -z "$vals" ]; then
+				put "$d/intl" "il_${item%%:*}" fail
+			else
+				put "$d/intl" "il_${item%%:*}" "$(printf '%s\n' $vals | sort -n | awk '{ a[NR] = $1 } END { printf "%.1f", a[int((NR + 1) / 2)] * 1000 }')|$fails"
+			fi
 		) &
 		# 分两批并发: 36 个节点同时解析域名, 慢的 DNS 会拖到超时
 		n=$((n + 1))
@@ -2082,7 +2124,8 @@ stage_route() {
 			progress "$(t "[网络] 逐跳回程路由…" "[Network] Hop-by-hop return routes…")"
 			run_route "$d"
 		fi
-		if [ -n "$(curl -6 -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ]; then
+		set_net 6
+		if [ -n "$(ccurl -s -m 5 "$API/cdn-cgi/trace" 2>/dev/null | sed -n 's/^ip=//p')" ]; then
 			progress "$(t "[网络] 逐跳回程路由 IPv6…" "[Network] Hop-by-hop routes over IPv6…")"
 			if [ "$ROUTE_FULL" = 1 ]; then run_route_full "$d" 6; run_route_edu "$d" 6; else run_route "$d" 6; fi
 		fi
@@ -2131,7 +2174,7 @@ menu_select() {
 	local choice
 	if [ "$LANG_OPT" = en ]; then
 		printf '  %s%s1%s  Full check-up    hardware → IP → network   %sabout 6 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  All checks       everything below, deeper  %sabout 20 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  All checks       everything incl. Geekbench (public upload)  %sabout 20 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  Hardware         CPU memory disk scores    %sabout 2 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP quality       purity unlocks blacklists %sabout 30 s%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  Network          BGP latency routes speed  %sabout 3 min%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -2141,7 +2184,7 @@ menu_select() {
 		printf '  %s0  Exit%s\n\n  Choose [1]: ' "$C_K" "$C_0"
 	else
 		printf '  %s%s1%s  一键全检      硬件 → IP → 网络      %s约 6 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
-		printf '  %s%s2%s  全部检测      下面各项全测一遍      %s约 20 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
+		printf '  %s%s2%s  全部检测      下面各项全测一遍(含 Geekbench,结果公开)      %s约 20 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s3%s  硬件与性能    系统 CPU 内存 硬盘    %s约 2 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s4%s  IP 质量       纯净度 解锁 黑名单    %s约 30 秒%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
 		printf '  %s%s5%s  网络质量      BGP 延迟 回程 测速    %s约 3 分钟%s\n' "$C_G" "$C_B" "$C_0" "$C_K" "$C_0"
@@ -2229,7 +2272,7 @@ if [ -z "$STAGES" ]; then
 	if [ "$INTERACTIVE" = 1 ]; then menu_select; else STAGES=" ip"; fi
 fi
 
-STAGE_COUNT=$(echo $STAGES | wc -w | tr -d ' ')
+STAGE_COUNT=$(printf '%s' "$STAGES" | wc -w | tr -d ' ')
 ALL="$TMP/all.fields"
 : >"$ALL"
 JSON_PARTS=""
@@ -2273,7 +2316,7 @@ while [ $# -gt 0 ]; do
 			printf '  %s\n' "$(t "代理模式下网络质量测的是本机而不是代理出口, 已跳过" "Network checks measure this machine, not the proxy exit — skipped")" >&2
 		else
 			"stage_$stage"
-			[ "${ROUTE_REUSED:-0}" = 1 ] && [ "$stage" = route ] || put "$TMP/$stage" dur $(($(date +%s) - start))
+			[ "$ROUTE_REUSED" = 1 ] && [ "$stage" = route ] || put "$TMP/$stage" dur $(($(date +%s) - start))
 			if post_report "$stage" "$TMP/$stage/fields" "$TMP/$stage/report" 4; then
 				# 回程详情和网络质量的逐跳字段同名, 两段都跑时总览只收一份 (同名字段会被解析成数组), 用时照加
 				if [ "$stage" = route ] && grep -q '^rt6*_' "$ALL"; then

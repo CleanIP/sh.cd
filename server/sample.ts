@@ -43,7 +43,7 @@ function latencyFields(): Record<string, string> {
   for (const [code] of PROVINCES) {
     for (const carrier of ["ct", "cu", "cm"]) {
       const b = (base[code] ?? 160 + Math.round(rand() * 40)) + extra[carrier]!
-      out[`lat_${code}_${carrier}`] = Array.from({ length: 5 }, () => (b + rand() * 6).toFixed(1)).join(",")
+      out[`lat_${code}_${carrier}`] = Array.from({ length: 10 }, () => (b + rand() * 6).toFixed(1)).join(",")
     }
   }
   return out

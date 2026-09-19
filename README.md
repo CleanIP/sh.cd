@@ -33,7 +33,7 @@ Geekbench 6（`-g`，全部检测默认包含）从 Geekbench 官方下载约 22
 | 多源检测 | VPN、代理、Tor、滥用历史、黑名单、机房检测，列出依据的数据源；风险与利好因素 |
 | 平台适用 | YouTube、Netflix、Disney+、TikTok、AI 订阅、电商、支付、游戏等平台的适用分 |
 | 流媒体与 AI 解锁 | Netflix、Disney+、YouTube Premium、TikTok、Prime Video、Reddit、ChatGPT、Claude、Gemini，附解锁地区 |
-| 邮件 | 25 端口出站，Gmail、Outlook、Yahoo、iCloud、QQ、163、Mail.ru、AOL、GMX、Mail.com、搜狐、新浪的握手结果 |
+| 邮件 | 25 端口出站，Gmail、Outlook、Yahoo、iCloud、QQ、163、Mail.ru、AOL、GMX、Mail.com、搜狐、新浪的握手结果；25 不通时再试 587 提交端口 |
 | DNS 出口 | 系统 DNS 实际使用的递归服务器及其归属 |
 
 双栈机器会分别给出 IPv4 和 IPv6 的 IP 质量报告。
@@ -44,7 +44,7 @@ Geekbench 6（`-g`，全部检测默认包含）从 Geekbench 官方下载约 22
 | --- | --- |
 | 本地策略 | NAT 类型（公网直连 / 防火墙 / 全锥形 NAT1 / 受限锥形 NAT2 / 端口限制锥形 NAT3 / 对称 NAT4）、TCP 拥塞控制与队列、收发缓冲区、IPv6 可用性 |
 | BGP 与接入 | ASN 注册信息与地址、路由与 RPKI、上游 / 对等 / 下游数量、IX 与机房数、主要上游 |
-| 三网延迟 | 全国 31 省电信 / 联通 / 移动的 TCP 延迟，每格 5 次采样的走势与中位数；有 IPv6 时加测三网 IPv6 延迟 |
+| 三网延迟 | 全国 31 省电信 / 联通 / 移动的 TCP 延迟，每格 10 次采样的走势与中位数；有 IPv6 时加测三网 IPv6 延迟 |
 | 市级延迟 | `-c`（全部检测默认包含）：223 个市级节点，按省分组给出各市的延迟中位数与丢包 |
 | 三网回程线路 | 默认测北京、上海、广州三网回程，识别 CN2 GIA / CN2 GT / 163 / CTGNET / 9929 / 4837 / CUG / CMIN2 / CMI；有 IPv6 时 IPv6 回程也测；菜单 6 或全部检测（菜单 2 / `-A -d`）看逐跳位置、延迟与 ASN |
 | 全省回程 | 菜单 7 或 `-R`（全部检测默认包含）：31 省 × 三网共 93 条线路，每格给出线路类型、延迟中位数与丢包；同一批目标再用 1400 字节的大包测一遍（大包回程），有 IPv6 时 IPv6 回程也是全省 |

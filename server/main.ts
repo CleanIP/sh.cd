@@ -17,7 +17,7 @@ import { resolve } from "node:path"
 import { changelogPage, changelogText } from "./changelog"
 import { hitStats } from "./hits"
 import { landingPage } from "./landing"
-import { langOf } from "./render/base"
+import { langOf, wantsColor } from "./render/base"
 import { handleReport, type Form } from "./report"
 import { loadResult, resultMarkdown, resultNotFoundPage, resultPage, resultText, startResultSweeper } from "./results"
 import { withHits } from "./site"
@@ -31,7 +31,13 @@ const MAX_BODY = 400_000
 let cached: { mtimeMs: number, body: string } | null = null
 
 async function script(): Promise<Response> {
-  const headers = { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", vary: "Accept" }
+  const headers = {
+    "content-type": "text/plain; charset=utf-8",
+    "cache-control": "no-store",
+    vary: "Accept",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+  }
   try {
     const st = await stat(SCRIPT)
     if (!cached || cached.mtimeMs !== st.mtimeMs) cached = { mtimeMs: st.mtimeMs, body: await readFile(SCRIPT, "utf8") }
@@ -44,13 +50,26 @@ async function script(): Promise<Response> {
 
 /** 网页响应: 页脚的脚本运行次数在这里填 (页面本身有缓存) */
 function htmlPage(html: string, lang: ReturnType<typeof langOf>, headers: Record<string, string> = {}, status = 200): Response {
-  return new Response(withHits(html, lang, hitStats()), { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", ...headers } })
+  return new Response(withHits(html, lang, hitStats()), {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer",
+      // 页面有内联样式与脚本 (无外部 JS, 只有统计像素), 粗 CSP 防被第三方嵌入与混入资源
+      "content-security-policy": "default-src 'self'; base-uri 'self'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline' https://analytics.cleanip.io; frame-ancestors 'self'",
+      ...headers,
+    },
+  })
 }
 
-/** 表单解析: 同名字段 (各阶段的 dur) 合成数组 */
+/** 表单解析: 同名字段 (各阶段的 dur) 合成数组; 单字段截断 4KB, 畸形超长值不进报告 */
 function parseForm(raw: string): Form {
   const out: Form = {}
-  for (const [k, v] of new URLSearchParams(raw)) {
+  for (let [k, v] of new URLSearchParams(raw)) {
+    if (k.length > 64) k = k.slice(0, 64)
+    if (v.length > 4096) v = v.slice(0, 4096)
     const prev = out[k]
     out[k] = prev === undefined ? v : Array.isArray(prev) ? [...prev, v] : [prev, v]
   }
@@ -59,13 +78,27 @@ function parseForm(raw: string): Form {
 
 startResultSweeper()
 
+// 缺配置早告警, 别等线上降级了才发现: IP 情报 / DNS 出口 / 结果页写入都依赖这些
+for (const [k, hint] of [
+  ["CLEANIP_API", "IP 情报与归属查询将被跳过"],
+  ["CLEANIP_API_KEY", "没有 key 时按匿名配额查询"],
+  ["DNS_PROBE_ZONE", "DNS 出口检测将被跳过"],
+  ["DNS_PROBE_NS_URLS", "DNS 出口检测将被跳过"],
+  ["DNS_PROBE_TOKEN", "DNS 出口检测将被跳过"],
+] as const) {
+  if (!String(process.env[k] || "").trim()) console.warn(`[sh.cd] 缺环境变量 ${k}: ${hint}`)
+}
+
 const server = Bun.serve({
   hostname: process.env.HOST || "127.0.0.1",
   port: Number(process.env.PORT || 3410),
   maxRequestBodySize: MAX_BODY * 2,
   async fetch(req, srv) {
     const url = new URL(req.url)
-    const caller = (req.headers.get("x-real-ip") || srv.requestIP(req)?.address || "").trim()
+    // X-Real-IP 只信任回环连接带来的 (生产是反代转发): 直连伪造请求头不再能冒充出口 IP
+    const direct = (srv.requestIP(req)?.address || "").trim()
+    const loopback = direct === "127.0.0.1" || direct === "::1" || direct === "::ffff:127.0.0.1"
+    const caller = ((loopback ? req.headers.get("x-real-ip") : null) || direct || "").trim()
 
     if (url.pathname === "/" && (req.method === "GET" || req.method === "HEAD")) {
       const accept = req.headers.get("accept") || ""
@@ -105,9 +138,8 @@ const server = Bun.serve({
         return new Response(resultMarkdown(r), { headers: { ...headers, "content-type": "text/markdown; charset=utf-8", "content-disposition": `inline; filename="sh.cd-${r.id}.md"` } })
       }
       if (html) return htmlPage(resultPage(r, lang), lang, headers)
-      // 终端里看: curl / wget 默认带颜色, ?color=0 / 1 手动指定; .txt 始终不带颜色
-      const ua = (req.headers.get("user-agent") || "").toLowerCase()
-      const color = result[2] !== ".txt" && (url.searchParams.has("color") ? url.searchParams.get("color") === "1" : /^(curl|wget)\//.test(ua))
+      // 终端里看: curl / wget 默认带颜色, ?color=0 / 1 手动指定; .txt 始终不带颜色 (与终端报告同一规则)
+      const color = result[2] !== ".txt" && wantsColor({ color: url.searchParams.get("color") }, req.headers.get("user-agent") || "")
       return new Response(resultText(r, color), { headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
     }
 

@@ -51,7 +51,9 @@ export async function fetchIp(caller: string): Promise<{ r: FullReport | null, b
     const r = await cleanip<FullReport>(`/api/v2/${encodeURIComponent(caller)}`, caller, { timeout: 12000 })
     return { r: r?.ok && r.ip ? r : null, blocked: false }
   } catch (e) {
-    return { r: null, blocked: e instanceof HttpError && e.status === 403 }
+    const blocked = e instanceof HttpError && e.status === 403
+    if (!blocked) console.error(`[sh.cd] cleanip query failed for ${caller}: ${e instanceof Error ? e.message : e}`)
+    return { r: null, blocked }
   }
 }
 
@@ -113,6 +115,8 @@ export async function resolveDns(uuid: string, caller: string, lang: "zh" | "en"
 
 type Peering = Pick<BgpInfo, "upstreams" | "counts" | "ix" | "fac">
 const bgpCache = new Map<number, { at: number, v: Peering }>()
+/** 进程内缓存, 上限 500 个 ASN (防枚举打爆内存, 配合 256M MemoryMax) */
+const BGP_CACHE_MAX = 500
 
 async function fetchPeering(asn: number): Promise<Peering> {
   const hit = bgpCache.get(asn)
@@ -153,6 +157,10 @@ async function fetchPeering(asn: number): Promise<Peering> {
     } catch { /* 没有名称就只显示 AS 号 */ }
   }))
   bgpCache.set(asn, { at: Date.now(), v })
+  if (bgpCache.size > BGP_CACHE_MAX) {
+    const oldest = bgpCache.keys().next()
+    if (!oldest.done) bgpCache.delete(oldest.value)
+  }
   return v
 }
 

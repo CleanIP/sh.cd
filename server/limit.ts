@@ -18,23 +18,29 @@ function ensureSweeper(windowMs: number) {
 /**
  * 限流键: IPv4 原样, IPv6 按 /64 聚合。
  * 系统的 IPv6 隐私扩展会轮换临时地址, 按完整地址限流等于没限流; /64 是单个局域网的标准分配单位。
+ * 各组去前导零后再取前 4 组, "2001:0db8…" 与 "2001:db8…" 是同一个 key。
  */
 export function rateLimitKey(ip: string): string {
   const v = (ip || "").trim().toLowerCase()
   if (!v) return "unknown"
   if (!v.includes(":")) return v
-  if (!v.includes("::")) return v.split(":").slice(0, 4).join(":") + "::/64"
   const [head = "", tail = ""] = v.split("::")
-  const h = head ? head.split(":").filter(Boolean) : []
-  const t = tail ? tail.split(":").filter(Boolean) : []
+  const h = head ? head.split(":") : []
+  const t = tail ? tail.split(":") : []
   const full = [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t]
-  return full.slice(0, 4).join(":") + "::/64"
+  if (full.length !== 8 || full.some((g) => !/^[0-9a-f]{0,4}$/.test(g))) return v
+  return full.map((g) => g.replace(/^0+/, "") || "0").slice(0, 4).join(":") + "::/64"
 }
 
-/** 同一个 key 在 windowMs 内最多 limit 次; 超限时给出还要等多少秒 */
+/** 同一个 key 在 windowMs 内最多 limit 次; 超限时给出还要等多少秒 (key 上限 2 万, 防 key 爆炸打爆内存) */
+const MAX_KEYS = 20_000
 export function rateLimit(key: string, limit: number, windowMs: number): { ok: boolean, retryAfterSec: number } {
   ensureSweeper(windowMs)
   const now = Date.now()
+  if (!buckets.has(key) && buckets.size >= MAX_KEYS) {
+    const oldest = buckets.keys().next()
+    if (!oldest.done) buckets.delete(oldest.value)
+  }
   let hits = buckets.get(key)
   if (!hits) buckets.set(key, (hits = []))
   let drop = 0

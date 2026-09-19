@@ -14,10 +14,6 @@ const SAMPLE = {
   mail_gmail: "ok",
   mail_outlook: "fail",
   mail_qq: "ok",
-  lat_bj_ct: "155.1|0",
-  lat_bj_cu: "fail",
-  lat_bj_cm: "1163.7|2",
-  lat_gd_ct: "88.0|0",
   // 一台洛杉矶云服务器的实测回程 (机房出口的两跳换成了文档示例地址)
   rt_bj_ct: "2:10.110.193.1,3:218.30.48.73,4:59.43.189.37,5:59.43.38.189,7:59.43.46.85,9:106.120.253.242",
   rt_bj_cu: "2:10.110.193.1,3:198.51.100.2,4:198.51.100.1,5:210.14.165.41,6:218.105.131.101,7:210.78.30.158",
@@ -37,8 +33,6 @@ describe("ipcheck 本机检测字段", () => {
     expect(local.media.tiktok).toEqual({ status: "no", region: "" });
     expect(local.media.prime).toEqual({ status: "fail", region: "" });
     expect(local.mail).toEqual({ gmail: "ok", outlook: "fail", qq: "ok" });
-    expect(local.latency).toContainEqual({ province: "bj", carrier: "cu", ms: null, lost: 4 });
-    expect(local.latency).toContainEqual({ province: "bj", carrier: "cm", ms: 1163.7, lost: 2 });
     expect(local.dnsUuid).toBe(SAMPLE.dns);
   });
 
@@ -49,13 +43,10 @@ describe("ipcheck 本机检测字段", () => {
       media_youtube: "unlocked",
       media_evil: "yes|US",
       mail_gmail: "ok\n",
-      lat_bj_ct: "12|9",
-      lat_xx_ct: "12.0|0",
       dns: "../../etc/passwd",
     });
     expect(local.media).toEqual({});
     expect(local.mail).toBeNull();
-    expect(local.latency).toEqual([]);
     expect(local.dnsUuid).toBeNull();
   });
 
@@ -89,8 +80,6 @@ describe("ipcheck 报告排版", () => {
     // 检测失败不显示地区
     expect(text).toMatch(/Prime Video\s+\[检测失败\]\n/);
     expect(text).toContain("[开放]");
-    expect(text).toContain("超时");
-    expect(text).toContain("1164 ms 丢2");
     expect(text).toContain("AS13335 Cloudflare, Inc. · 美国");
   });
 

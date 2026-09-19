@@ -12,11 +12,15 @@ export interface HwData {
   uptime: Parts
   procs: Parts
   tz: Parts
+  /** 时钟偏移毫秒 | 来源 (无 chrony 时不报) */
+  ntp: Parts
   board: Parts
   chipset: string[]
   nic: string[]
   gpu: string[]
   cpu: Parts
+  /** 宿主偷用% | IO 等待% (非 Linux 不报) */
+  csteal: Parts
   cache: Parts
   flags: string[] | null
   mem: Parts
@@ -79,6 +83,9 @@ const list = (v: unknown) => {
 
 export const ATTO_SIZES = ["512", "1k", "2k", "4k", "8k", "16k", "32k", "64k", "128k", "256k", "512k", "1m", "2m", "4m", "8m", "16m", "32m", "64m"]
 
+// fio 跑分 6 段 (读带宽|读IOPS|读p99微秒|写带宽|写IOPS|写p99微秒), 老脚本 4 段, 都收
+const ioParts = (v: unknown) => textParts(v, 6, 12) ?? textParts(v, 4, 20)
+
 export function parseHw(body: Record<string, unknown>): HwData | null {
   if (!Object.keys(body).some((k) => k.startsWith("hw_"))) return null
   const virt = str(body.hw_virt)
@@ -89,11 +96,13 @@ export function parseHw(body: Record<string, unknown>): HwData | null {
     uptime: textParts(body.hw_uptime, 2, 60),
     procs: textParts(body.hw_procs, 4, 12),
     tz: textParts(body.hw_tz, 3, 60),
+    ntp: textParts(body.hw_ntp, 2, 16),
     board: textParts(body.hw_board, 4),
     chipset: list(body.hw_chipset),
     nic: list(body.hw_nic),
     gpu: list(body.hw_gpu),
     cpu: textParts(body.hw_cpu, 6),
+    csteal: textParts(body.hw_csteal, 2, 8),
     cache: textParts(body.hw_cache, 4, 24),
     flags: /^[a-z0-9_,]{0,200}$/.test(flags) ? flags.split(",").filter(Boolean) : null,
     mem: textParts(body.hw_mem, 5, 24),
@@ -102,8 +111,8 @@ export function parseHw(body: Record<string, unknown>): HwData | null {
     bench: {
       cpu: textParts(body.bn_cpu, 4, 24),
       mem: textParts(body.bn_mem, 3, 24),
-      disk: Object.fromEntries(["r4q1", "r4q32", "s1q1", "s1q8"].map((k) => [k, textParts(body[`bn_${k}`], 4, 20)])),
-      atto: ATTO_SIZES.map((s) => [s, textParts(body[`bn_atto_${s}`], 4, 20)] as const).filter((x): x is [string, string[]] => !!x[1]),
+      disk: Object.fromEntries(["r4q1", "r4q32", "s1q1", "s1q8"].map((k) => [k, ioParts(body[`bn_${k}`])])),
+      atto: ATTO_SIZES.map((s) => [s, ioParts(body[`bn_atto_${s}`])] as const).filter((x): x is [string, string[]] => !!x[1]),
       dd: textParts(body.bn_dd, 3, 24),
       gb: parseGb(str(body.bn_gb)),
     },
@@ -195,6 +204,9 @@ const T = {
   nic: ["网卡", "Network"],
   gpu: ["显卡", "Graphics"],
   cpu: ["CPU", "CPU"],
+  steal: ["宿主偷用", "Steal"],
+  iowait: ["IO 等待", "IO wait"],
+  ntp: ["时钟偏移", "Clock offset"],
   cores: ["核心", "Cores"],
   cache: ["缓存", "Cache"],
   flags: ["指令集", "Extensions"],
@@ -217,14 +229,12 @@ const T = {
   reading: ["读取", "Read"],
   writing: ["写入", "Write"],
   noTools: ["未安装 sysbench / fio，以下为系统自带工具的近似值", "sysbench / fio not installed; rough built-in measurements"],
-  approx: ["近似", "approx."],
   atto: ["ATTO 块大小", "ATTO block sizes"],
   temp: ["温度", "Temperature"],
   modules: ["内存条", "Modules"],
   slots: ["插槽", "Slots"],
   health: ["健康", "Health"],
   noRoot: ["需要 root 才能读取硬盘健康与内存条", "Root is needed to read disk health and memory modules"],
-  gbSkip: ["Geekbench", "Geekbench"],
 } satisfies Record<string, Pair>
 
 const TEMP_NAMES: Record<string, Pair> = { cpu: ["CPU", "CPU"], nvme: ["NVMe", "NVMe"], disk: ["硬盘", "Disk"], gpu: ["显卡", "GPU"], board: ["主板", "Board"] }
@@ -245,6 +255,10 @@ const CASES: Array<[key: string, label: Pair]> = [
   ["s1q1", ["顺序 1M Q1", "Seq 1M Q1"]],
   ["s1q8", ["顺序 1M Q8", "Seq 1M Q8"]],
 ]
+
+/** p99 微秒排版: 毫秒以上取 1–2 位小数, 否则取整加 us */
+const fmtLat = (us: number | null) =>
+  us === null ? "-" : us >= 10000 ? `${(us / 1000).toFixed(1)}ms` : us >= 1000 ? `${(us / 1000).toFixed(2)}ms` : `${Math.round(us)}us`
 
 /** lscpu 新版给的缓存是所有实例合计 ("512 KiB (16 instances)"), 换算成每个实例; 旧版格式 ("32K") 原样 */
 export function cachePerInstance(v: string): string {
@@ -290,6 +304,14 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
     const off = /^[+-]\d{4}$/.test(hw.tz[1]!) ? ` (UTC${hw.tz[1]!.slice(0, 3)}:${hw.tz[1]!.slice(3)})` : ""
     put(L(T.tz), fit(`${hw.tz[0]}${off}${hw.tz[2] ? ` · ${hw.tz[2]}` : ""}`, VW))
   }
+  if (hw.ntp) {
+    // chrony 读到的本地时钟相对 NTP 的偏移, 落后为负; 差 1 秒以上标黄 (证书 / DNSSEC 排错先看时钟)
+    const ms = num(hw.ntp[0])
+    if (ms !== null) {
+      const txt = `${ms >= 0 ? "+" : ""}${ms} ms${hw.ntp[1] ? ` · ${hw.ntp[1]}` : ""}`
+      put(L(T.ntp), Math.abs(ms) >= 1000 ? tonePaint(txt, "warn") : txt)
+    }
+  }
   if (hw.temps.length) {
     put(L(T.temp), hw.temps.map((t) => `${L(TEMP_NAMES[t.kind]!)} ${tonePaint(`${Math.round(t.c)}°C`, t.c >= (TEMP_WARN[t.kind] ?? 85) ? "warn" : "neutral")}`).join(" · "))
   }
@@ -319,6 +341,10 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
     const bits = [zh ? `${cores} 核 ${threads} 线程` : `${cores} core${cores === "1" ? "" : "s"} ${threads} thread${threads === "1" ? "" : "s"}`]
     if (num(mhz) !== null) bits.push(`${mhz} MHz`)
     if (num(usage) !== null) bits.push(zh ? `占用 ${usage}%` : `${usage}% busy`)
+    const st = num(hw.csteal?.[0])
+    const io = num(hw.csteal?.[1])
+    if (st !== null && st > 0) bits.push(tonePaint(zh ? `${L(T.steal)} ${hw.csteal![0]}%` : `${L(T.steal)} ${hw.csteal![0]}%`, st >= 10 ? "bad" : "warn"))
+    if (io !== null && io > 0) bits.push(zh ? `${L(T.iowait)} ${hw.csteal![1]}%` : `${L(T.iowait)} ${hw.csteal![1]}%`)
     put(L(T.cores), bits.join(" · "))
   }
   if (hw.cache?.some(Boolean)) {
@@ -470,7 +496,18 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
     out.push(row("", paint(pad(`${L(T.reading)} · IOPS`, COL + 2) + `${L(T.writing)} · IOPS`, "gray")))
     for (const [k, label] of cases) {
       const p = hw.bench.disk[k]!
-      put(L(label), `${ioCell(num(p[0]), num(p[1]), COL, 11)}  ${ioCell(num(p[2]), num(p[3]), COL, 11)}`.trimEnd())
+      // 6 段新格式写在 3/4, 4 段老格式写在 2/3
+      const t = p.length >= 6 ? [p[0], p[1], p[3], p[4]] : p
+      put(L(label), `${ioCell(num(t[0]), num(t[1]), COL, 11)}  ${ioCell(num(t[2]), num(t[3]), COL, 11)}`.trimEnd())
+    }
+    // 尾延迟只看 4K 随机: Q1 是应用体感, Q32 看队列堆积; 顺序大包的 p99 参考意义小, 不占行数
+    for (const k of ["r4q1", "r4q32"]) {
+      const p = hw.bench.disk[k]
+      if (!p || p.length < 6) continue
+      const rl = num(p[2]), wl = num(p[5])
+      if (rl === null && wl === null) continue
+      const lab = CASES.find(([kk]) => kk === k)![1]
+      put(`${L(lab)} p99`, `${zh ? "读" : "read"} ${paint(fmtLat(rl), "bold")} · ${zh ? "写" : "write"} ${paint(fmtLat(wl), "bold")}`)
     }
   } else if (hw.bench.dd) {
     const w = num(hw.bench.dd[0])
@@ -484,7 +521,8 @@ export function renderHw(R: Renderer, hw: HwData): string[] {
     out.push("")
     out.push(`  ${paint(pad(L(T.atto), labelW), "bold")}${paint(pad(`${L(T.reading)} · IOPS`, 22) + `${L(T.writing)} · IOPS`, "gray")}`)
     for (const [size, parts] of hw.bench.atto) {
-      out.push(`  ${pad(size.toUpperCase(), labelW)}${ioCell(num(parts[0]), num(parts[1]), 20, 11)}  ${ioCell(num(parts[2]), num(parts[3]), 20, 11)}`.trimEnd())
+      const t = parts.length >= 6 ? [parts[0], parts[1], parts[3], parts[4]] : parts
+      out.push(`  ${pad(size.toUpperCase(), labelW)}${ioCell(num(t[0]), num(t[1]), 20, 11)}  ${ioCell(num(t[2]), num(t[3]), 20, 11)}`.trimEnd())
     }
   }
   out.push(hr())

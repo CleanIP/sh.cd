@@ -1,7 +1,9 @@
 // 脚本运行次数, 显示在报告底部「今日 N 次 · 累计 N 次」。
 // 存 $DATA_DIR/hits.json, tmp + rename 原子替换; 单进程写, 无并发问题。
+// 计数同步读缓存, 落盘异步, 不阻塞请求。
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
+import { mkdir, rename, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 
 interface Store {
@@ -33,18 +35,19 @@ export function hitStats(): { total: number, today: number } {
   return { total: s.total, today: s.days[today()] || 0 }
 }
 
-export function recordHit(): { total: number, today: number } {
+export async function recordHit(): Promise<{ total: number, today: number }> {
   const s = load()
   const day = today()
   s.total += 1
   s.days[day] = (s.days[day] || 0) + 1
   for (const d of Object.keys(s.days).sort().slice(0, -7)) delete s.days[d]
   try {
-    mkdirSync(dirname(FILE), { recursive: true })
-    writeFileSync(`${FILE}.tmp`, JSON.stringify(s))
-    renameSync(`${FILE}.tmp`, FILE)
-  } catch {
-    // 写盘失败只影响重启后的计数, 不让请求失败
+    await mkdir(dirname(FILE), { recursive: true })
+    await writeFile(`${FILE}.tmp`, JSON.stringify(s))
+    await rename(`${FILE}.tmp`, FILE)
+  } catch (e) {
+    // 写盘失败只影响重启后的计数, 不让请求失败, 但要记下来 (磁盘满了能早发现)
+    console.error(`[sh.cd] hits write failed: ${e instanceof Error ? e.message : e}`)
   }
   return { total: s.total, today: s.days[day] || 0 }
 }

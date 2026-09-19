@@ -42,6 +42,10 @@ export interface NetData {
   nat: { kind: NatKind, ip: string } | null
   tcp: string[] | null
   v6: boolean | null
+  /** 域名解析耗时毫秒 (单次, 延迟统计已剔除解析时间) */
+  dnsMs: number | null
+  /** TLS 握手耗时毫秒 (单次, 到 sh.cd 本身) */
+  tlsMs: number | null
   latency: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
   latency6: Array<{ province: string, carrier: Carrier, samples: Array<number | null> }>
   /** 市级延迟 (-c): zstatic 的 223 个市级节点 */
@@ -56,7 +60,7 @@ export interface NetData {
   speedCn: Array<{ province: string, carrier: Carrier, result: { city: string, down: number | "stall" | null, up: number | "stall" | null } | null }>
   /** null = 连接失败, "stall" = 节点不收发 (多为节点对来源限制) */
   speed: Array<{ carrier: "near" | "intl" | Carrier, place: string, down: number | "stall" | null, up: number | "stall" | null }>
-  intl: Array<{ place: string, ms: number | null }>
+  intl: Array<{ place: string, ms: number | null, lost: number | null }>
   deep: boolean
   dur: number | null
 }
@@ -89,7 +93,7 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
   const keys = Object.keys(body)
   if (!keys.some((k) => /^(nt_|latc?6?_|late6?_|rtl?6?_|rte6?_|sp_|spc_|il_)/.test(k))) return null
   const data: NetData = {
-    nat: null, tcp: null, v6: null, latency: [], latency6: [], latencyCity: [], routes: [], routesLarge: [], edu: [], routes6: [], speed: [], speedCn: [], intl: [],
+    nat: null, tcp: null, v6: null, dnsMs: null, tlsMs: null, latency: [], latency6: [], latencyCity: [], routes: [], routesLarge: [], edu: [], routes6: [], speed: [], speedCn: [], intl: [],
     deep: body.deep === "1", dur: num(str(body.dur)),
   }
 
@@ -99,12 +103,15 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
   else if (body.nt_nat === "fail") data.nat = { kind: "fail", ip: "" }
   data.tcp = textParts(body.nt_tcp, 4, 60)
   if (body.nt_v6 === "yes" || body.nt_v6 === "no") data.v6 = body.nt_v6 === "yes"
+  data.dnsMs = /^\d{1,5}$/.test(str(body.nt_dns)) ? Number(body.nt_dns) : null
+  data.tlsMs = /^\d{1,5}$/.test(str(body.nt_tls)) ? Number(body.nt_tls) : null
 
   for (const [key, list] of [["lat", data.latency], ["lat6", data.latency6]] as const) {
     for (const [prov] of PROVINCES) {
       for (const carrier of CARRIERS) {
         const v = str(body[`${key}_${prov}_${carrier}`])
-        if (!/^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4}$/.test(v)) continue
+        // 采样数 5–10 (老脚本 5 次, 新脚本 10 次), 都收
+        if (!/^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4,9}$/.test(v)) continue
         list.push({ province: prov, carrier, samples: v.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) })
       }
     }
@@ -112,7 +119,7 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
 
   for (const [key, province, carrier, zh, en] of CITY_NODES) {
     const v = str(body[`latc_${key}`])
-    if (!/^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4}$/.test(v)) continue
+    if (!/^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4,9}$/.test(v)) continue
     data.latencyCity.push({ key, province, carrier, zh, en, samples: v.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) })
   }
 
@@ -183,15 +190,19 @@ export function parseNet(body: Record<string, unknown>): NetData | null {
         })
       if (v !== "none" && !hops.length) continue
       const lv = str(body[`${lat}_${prov}`])
-      const samples = /^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4}$/.test(lv) ? lv.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) : null
+      // 采样数 5–10 (老脚本 5 次, 新脚本 10 次), 都收
+      const samples = /^\d{1,5}(\.\d)?(,\d{1,5}(\.\d)?){4,9}$/.test(lv) ? lv.split(",").map((x) => (Number(x) > 0 ? Number(x) : null)) : null
       data.edu.push({ province: prov, v6, hops, samples })
     }
   }
 
   for (const place of INTL_ORDER) {
     const v = str(body[`il_${place}`])
-    if (v === "fail") data.intl.push({ place, ms: null })
-    else if (/^\d{1,5}(\.\d)?$/.test(v)) data.intl.push({ place, ms: Number(v) })
+    // 新格式 中位数|丢包数 (分母恒为 10), 老脚本单个数值按丢包未知收
+    const m = /^(\d{1,5}(?:\.\d)?)\|(\d{1,2})$/.exec(v)
+    if (v === "fail") data.intl.push({ place, ms: null, lost: null })
+    else if (m) data.intl.push({ place, ms: Number(m[1]), lost: Number(m[2]) })
+    else if (/^\d{1,5}(\.\d)?$/.test(v)) data.intl.push({ place, ms: Number(v), lost: null })
   }
   return data
 }
@@ -213,6 +224,9 @@ const T = {
   rmem: ["接收缓冲", "Receive buffer"],
   wmem: ["发送缓冲", "Send buffer"],
   v6: ["IPv6", "IPv6"],
+  dnsMs: ["DNS 解析", "DNS lookup"],
+  dnsSlow: ["超过 1 秒会拖高延迟读数", "Over 1 s inflates latency readings"],
+  tls: ["TLS 握手", "TLS handshake"],
   yes: ["可用", "Available"],
   no: ["不可用", "Unavailable"],
   bgp: ["BGP 与接入", "BGP & peering"],
@@ -228,8 +242,8 @@ const T = {
   upstream: ["上游", "Upstreams"],
   latency: ["三网延迟", "China carrier latency"],
   latencyCity: ["市级延迟", "City latency"],
-  latencyCityNote: ["各市三网节点的中位数与丢包, 只列测到的", "Median and loss per city node; answered nodes only"],
-  latencyNote: ["TCP 握手 5 次, 走势 + 中位数 ms, × 为超时, 重传计入丢包", "5 TCP handshakes: trend + median ms, × = timeout"],
+  latencyCityNote: ["各市三网节点的中位数与丢包, 只列测到的, 颜色刻度同三网延迟", "Median and loss per city node; answered nodes only, same color scale"],
+  latencyNote: ["TCP 握手 10 次, 走势 + 中位数 ms, × 为超时, 重传计入丢包; 绿<100 · 黄200–300 · 红>300ms", "10 TCP handshakes: trend + median ms, × = timeout; green <100 · yellow 200–300 · red >300 ms"],
   avg: ["平均", "Average"],
   ct: ["电信", "Telecom"],
   cu: ["联通", "Unicom"],
@@ -238,6 +252,7 @@ const T = {
   routesFull: ["全省回程线路", "Return routes by province"],
   routesLarge: ["大包回程", "Large-packet routes"],
   routeNote: ["线路 · 延迟 ms · 丢包", "line · latency ms · loss"],
+  ecmp: ["同跳多回包, 疑似 ECMP 多路径", "Multiple replies at the same TTL (ECMP)"],
   edu: ["教育网回程", "CERNET return routes"],
   eduNote: ["每省一所高校, 线路指进教育网前最后经过的骨干网", "One university per province; line = backbone before CERNET"],
   routeNoteLarge: ["1400 字节的包走的线路, 与上表不同说明大包绕路或被限速", "Path of 1400-byte packets; differs = detour or throttle"],
@@ -245,6 +260,7 @@ const T = {
   routeUnknown: ["未识别", "unknown"],
   routeLegend: ["精品线路: CN2 GIA · CTGNET · 9929 · CMIN2", "Premium: CN2 GIA · CTGNET · 9929 · CMIN2"],
   speed: ["带宽测速", "Bandwidth"],
+  speedNote: ["4 连接 × 预热 2 秒 + 计量 4 秒; 上传按写入字节计量, 短窗口可能偏高", "4 conns × 2 s warm-up + 4 s window; upload counts written bytes, may read high"],
   down: ["下载", "Download"],
   up: ["上传", "Upload"],
   near: ["就近", "Nearby"],
@@ -252,7 +268,7 @@ const T = {
   speedStall: ["节点受限", "Throttled"],
   noNode: ["暂无境外可用的测速节点", "No test server reachable from abroad"],
   intl: ["国际延迟", "International latency"],
-  intlNote: ["TCP 握手 ms, × 为超时", "TCP handshake ms, × = timeout"],
+  intlNote: ["TCP 握手 ms, 每点 10 次取中位数, 有丢包标黄, × 为超时; 绿<50 · 黄200–400 · 红>400ms", "TCP handshake ms, median of 10 per point, loss in yellow, × = timeout; green <50 · yellow 200–400 · red >400 ms"],
   detail: ["回程路由详情", "Hop-by-hop return routes"],
   private: ["内网", "private"],
 } satisfies Record<string, Pair>
@@ -270,8 +286,13 @@ const NAT_KINDS: Partial<Record<NatKind, [Pair, Tone, Pair | null]>> = {
 }
 
 function latencyTone(ms: number): Tone {
-  // 境外到国内 150ms 上下是常态, 只把明显好的标绿、明显差的标黄
-  return ms < 100 ? "good" : ms < 200 ? "neutral" : "warn"
+  // 国内刻度: <100 绿, 100–200 默认, 200–300 黄, >300 红
+  return ms < 100 ? "good" : ms < 200 ? "neutral" : ms < 300 ? "warn" : "bad"
+}
+
+function intlTone(ms: number): Tone {
+  // 跨境 baseline 高: <50 绿, 50–200 默认, 200–400 黄, >400 红
+  return ms < 50 ? "good" : ms < 200 ? "neutral" : ms < 400 ? "warn" : "bad"
 }
 
 const padL = (s: string, w: number) => " ".repeat(Math.max(0, w - width(s))) + s
@@ -297,7 +318,7 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   const put = (label: string, value: string) => out.push(...rowsFlex(row, label, value, VW))
 
   // —— 本地策略 ——
-  if (net.nat || net.tcp || net.v6 !== null) {
+  if (net.nat || net.tcp || net.v6 !== null || net.dnsMs !== null || net.tlsMs !== null) {
     title(T.local)
     if (net.nat) {
       const kind = NAT_KINDS[net.nat.kind]
@@ -315,7 +336,16 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
       if (rmem) put(L(T.rmem), paint(rmem, "gray"))
       if (wmem) put(L(T.wmem), paint(wmem, "gray"))
     }
-    if (net.v6 !== null) put(L(T.v6), net.v6 ? badge(L(T.yes), "good") : badge(L(T.no), "neutral"))
+    if (net.dnsMs !== null) {
+      put(L(T.dnsMs), net.dnsMs >= 1000
+        ? tonePaint(`${net.dnsMs} ms`, "warn") + paint(`  ${L(T.dnsSlow)}`, "gray")
+        : `${net.dnsMs} ms`)
+    }
+    if (net.tlsMs !== null) {
+      put(L(T.tls), net.tlsMs >= 1000 ? tonePaint(`${net.tlsMs} ms`, "warn") : `${net.tlsMs} ms`)
+    }
+    // 测过但不可用标红 (缺 IPv6 是明确短板); 没测 (null) 整行不出
+    if (net.v6 !== null) put(L(T.v6), net.v6 ? badge(L(T.yes), "good") : badge(L(T.no), "bad"))
     out.push(hr())
   }
 
@@ -358,9 +388,11 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   // —— 三网延迟 (IPv4 / IPv6) ——
   const latencyTable = (rows: NetData["latency"], heading: string) => {
     if (!rows.length) return
-    const LABEL = zh ? 10 : 16
+    // 英文最长省名 Inner Mongolia 14 列, 标签列 15; 3 格 × 15 (10 字符走势 + 空格 + 4 位中位数) + 缩进 2 = 62, 刚好放进报告宽度
+    const LABEL = zh ? 10 : 15
     const COL = 15
-    out.push(`  ${paint(heading, "bold")}`, `  ${paint(L(T.latencyNote), "gray")}`)
+    out.push(`  ${paint(heading, "bold")}`)
+    wrap(L(T.latencyNote), VW).forEach((l) => out.push(`  ${paint(l, "gray")}`))
     out.push(`  ${pad("", LABEL)}${paint(CARRIERS.map((c) => pad(L(T[c]), COL)).join("").trimEnd(), "gray")}`)
     const medians: Record<string, number[]> = { ct: [], cu: [], cm: [] }
     for (const [code, pzh, pen] of PROVINCES) {
@@ -376,7 +408,10 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
         medians[c]!.push(m)
         const lo = Math.min(...ok)
         const tone: Tone = lost ? "warn" : latencyTone(m)
-        return paint(spark(samples, lo, Math.max(Math.max(...ok), lo + 20)), "gray") + " " + tonePaint(padL(String(Math.round(m)), 4), tone) + " ".repeat(COL - 10)
+        // 每条柱按自身值套国内刻度 (× 红色): 走势看形状, 颜色看绝对水平, 一次重传造成的黄条不会被平均掉
+        const bars = spark(samples, lo, Math.max(Math.max(...ok), lo + 20), (ch, s) => tonePaint(ch, s === null ? "bad" : latencyTone(s)))
+        // spark 一采样一格, 尾部空格按采样数自适应 (5 次旧脚本补 5 格, 10 次新脚本不补)
+        return bars + " " + tonePaint(padL(String(Math.round(m)), 4), tone) + " ".repeat(Math.max(0, COL - samples.length - 5))
       }).join(""))
       out.push(`  ${pad(fit(zh ? pzh : pen, LABEL - 1), LABEL)}${value}`)
     }
@@ -394,7 +429,8 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   if (net.latencyCity.length) {
     const LABEL = zh ? 10 : 13
     const CELL = 9
-    out.push(`  ${paint(L(T.latencyCity), "bold")}`, `  ${paint(L(T.latencyCityNote), "gray")}`)
+    out.push(`  ${paint(L(T.latencyCity), "bold")}`)
+    wrap(L(T.latencyCityNote), VW).forEach((l) => out.push(`  ${paint(l, "gray")}`))
     out.push(`  ${pad("", LABEL)}${paint(CARRIERS.map((c) => pad(L(T[c]), CELL)).join(" ").trimEnd(), "gray")}`)
     for (const [code, pzh, pen] of PROVINCES) {
       const rows = net.latencyCity.filter((x) => x.province === code)
@@ -409,7 +445,7 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
           const med = median(s2.values.filter((x): x is number => x !== null))
           const loss = Math.round((s2.lost / s2.values.length) * 100)
           const msText = med === null ? padL("×", 5) : padL(String(Math.round(med)), 5)
-          return (med === null ? tonePaint(msText, "bad") : paint(msText, "bold"))
+          return (med === null ? tonePaint(msText, "bad") : tonePaint(msText, latencyTone(med), "bold"))
             + (loss ? tonePaint(padL(`${loss}%`, 4), loss > 20 ? "bad" : "warn") : paint(padL("", 4), "gray"))
         }).join(" "))
         out.push(`  ${pad(fit(zh ? group[0]!.zh : group[0]!.en, LABEL - 1), LABEL)}${value}`)
@@ -466,7 +502,7 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
         const msText = padL(med === null ? "" : String(Math.round(med)), 4)
         const lossText = loss === null ? padL("", 4) : padL(`${loss}%`, 4)
         const head = cls.code === "unknown" ? paint(name, "gray") : tonePaint(name, cls.tone, ...(cls.tone === "good" ? ["bold" as const] : []))
-        return head + paint(msText, "gray") + (loss ? tonePaint(lossText, loss > 20 ? "bad" : "warn") : paint(lossText, "gray"))
+        return head + (med === null ? paint(msText, "gray") : tonePaint(msText, latencyTone(med))) + (loss ? tonePaint(lossText, loss > 20 ? "bad" : "warn") : paint(lossText, "gray"))
       }).join(" "))
       out.push(`  ${pad(fit(zh ? pzh : pen, LABEL - 1), LABEL)}${value}`)
     }
@@ -516,6 +552,7 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
     const LABEL = 26
     const COL = 14
     out.push(`  ${paint(pad(L(T.speed), LABEL), "bold")}${paint(pad(L(T.down), COL) + L(T.up), "gray")}`)
+    wrap(L(T.speedNote), VW).forEach((l) => out.push(`  ${paint(l, "gray")}`))
     const cell = (v: number | "stall" | null) => v === null
       ? tonePaint(pad(L(T.speedFail), COL), "bad")
       : v === "stall" ? paint(pad(L(T.speedStall), COL), "gray") : pad(fmtMbps(v), COL)
@@ -559,12 +596,14 @@ export function renderNet(R: Renderer, net: NetData, bgp: BgpInfo | null): strin
   // —— 国际延迟 ——
   if (net.intl.length) {
     title(T.intl)
-    out.push(`  ${paint(L(T.intlNote), "gray")}`)
+    wrap(L(T.intlNote), VW).forEach((l) => out.push(`  ${paint(l, "gray")}`))
     // 每行: 大洲 11 列 + 3 格 (地名 11 列 + 延迟 4 列), 格间空 2 列, 共 62 列
     for (const group of INTL_GROUPS) {
       const cells = group.places.flatMap((place) => net.intl.filter((x) => x.place === place)).map((x) => {
         const name = fit(PLACES[x.place]![zh ? 0 : 1], 11)
-        const ms = x.ms === null ? tonePaint(padL("×", 4), "bad") : tonePaint(padL(String(Math.round(x.ms)), 4), x.ms < 50 ? "good" : x.ms < 200 ? "neutral" : "warn")
+        // 有丢包标黄 (分母恒为 10); 老脚本无丢包数, 只按延迟分档
+        const tone = x.ms === null ? "bad" as const : x.lost ? "warn" as const : intlTone(x.ms)
+        const ms = x.ms === null ? tonePaint(padL("×", 4), "bad") : tonePaint(padL(String(Math.round(x.ms)), 4), tone)
         return pad(name, 11) + ms
       })
       for (let i = 0; i < cells.length; i += 3) {
@@ -651,6 +690,9 @@ export function renderRouteDetail(R: Renderer, net: NetData, hops: Record<string
         const cls = r.hops.length ? classifyRoute(carrier, r.hops) : null
         const head = `${zh ? `${czh}${L(T[carrier])}` : `${L(T[carrier])} ${cen}`}`
         out.push(`  ${paint(head, "bold")}  ${cls ? (cls.code === "unknown" ? paint(L(cls.label), "gray") : tonePaint(L(cls.label), cls.tone, "bold")) : paint(L(T.routeNone), "gray")}`)
+        // 同一 TTL 回不同 IP: 负载均衡把探测包散到了多条路径, 逐跳只是其中几条的拼凑, 线路结论打折
+        const ecmp = [...new Set(r.hops.filter((h) => r.hops.some((x) => x.ttl === h.ttl && x.ip !== h.ip)).map((h) => h.ttl))].sort((a, b) => a - b)
+        if (ecmp.length) out.push(`  ${paint(`${L(T.ecmp)}: TTL ${ecmp.join(", ")}`, "gray")}`)
         hopLines(r.hops)
         out.push("")
       }

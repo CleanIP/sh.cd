@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check": "bash -n check.sh && bun test && tsc --noEmit -p tsconfig.json",
     "nodes:check": "bun run scripts/sync-nodes.ts",
-    "nodes:sync": "bun run scripts/sync-nodes.ts --write"
+    "nodes:sync": "bun run scripts/sync-nodes.ts --write",
+    "probes:check": "bun run scripts/check-probes.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

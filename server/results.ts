@@ -102,7 +102,10 @@ export function saveSection(runKey: string, meta: { lang: Lang, version: string,
   const at = r.sections.findIndex((s) => s.key === section.key)
   if (at >= 0) r.sections[at] = section
   else if (r.sections.length < MAX_SECTIONS) r.sections.push(section)
-  else return null
+  else {
+    console.error(`[sh.cd] result ${id} dropped section ${section.key}: over ${MAX_SECTIONS} sections`)
+    return null
+  }
   // IPv4 出口优先当作这台机器的 IP (IPv6 阶段在 IPv4 之后提交)
   if (meta.ip && (!r.ip || (r.ip.includes(":") && !meta.ip.includes(":")))) r.ip = meta.ip
   // 双栈时 IPv4 出口的归属作为这台机器的要点, IPv6 阶段不覆盖
@@ -110,14 +113,18 @@ export function saveSection(runKey: string, meta: { lang: Lang, version: string,
   r.updated = now
   r.planned = Math.max(r.planned, meta.planned)
   const json = JSON.stringify(r)
-  if (json.length > MAX_FILE) return null
+  if (json.length > MAX_FILE) {
+    console.error(`[sh.cd] result ${id} not saved: ${(json.length / 1024).toFixed(0)} KB over ${(MAX_FILE / 1024).toFixed(0)} KB cap`)
+    return null
+  }
   try {
     const file = fileOf(id)
     mkdirSync(resolve(file, ".."), { recursive: true })
     writeFileSync(`${file}.tmp`, json)
     renameSync(`${file}.tmp`, file)
     return resultUrl(id)
-  } catch {
+  } catch (e) {
+    console.error(`[sh.cd] result save failed for ${id}: ${e instanceof Error ? e.message : e}`)
     return null
   }
 }

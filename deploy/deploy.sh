@@ -22,7 +22,7 @@ cd "$ROOT"
 echo "==> 检查"
 bash -n check.sh
 bun test >/dev/null
-bunx tsc --noEmit -p tsconfig.json
+bun run typecheck
 
 REV="$(git rev-parse --short=12 HEAD)"
 git diff --quiet HEAD -- check.sh CHANGELOG.md CHANGELOG.en.md server assets package.json || REV="$REV-wip-$(date -u +%Y%m%d%H%M%S)"

@@ -3,13 +3,12 @@
 // 脚本在用户机器上测流媒体 / AI 解锁、邮件 25 端口、三网 TCP 延迟与回程线路、DNS 出口、带宽, 以表单字段提交:
 //   media_<服务>=yes|US       yes | no | originals | web | fail, 竖线后是地区码 (Gemini 为三位码)
 //   mail_<邮箱>=ok|reject|fail   reject = 连上了但对方回 4xx/5xx 拒收
-//   lat_<省>_<ct|cu|cm>=155.1|0   毫秒|4 次里失败次数, 或 fail
 //   rt_<bj|sh|gd>_<ct|cu|cm>=3:59.43.1.1,4:202.97.1.1   回程逐跳 TTL:IP, 一跳都没回应为 none
 //   sp_<n>=<near|ct|cu|cm>|<节点>|<下载 Mbps>|<上传 Mbps>   测不出为 fail; 节点: 就近节点为城市名原文, 三网为省份代码
 //   dns=<32 位 hex>          DNS 探针的一次性 uuid
 // 字段一律按白名单 + 正则收, 不认识的丢掉 —— 这些值会原样进终端报告, 不能让人塞控制符进来。
 
-import { pad, width, type Lang, type Pair, type Renderer, type Tone } from "./base"
+import { pad, width, type Pair, type Renderer, type Tone } from "./base"
 import { classifyRoute, type RouteHop } from "./route"
 
 export const MEDIA = [
@@ -64,7 +63,8 @@ export interface IpcheckLocal {
   media: Record<string, { status: MediaStatus, region: string }>
   /** 没测 (IPv6 / 代理 / 指定网卡 / -S mail) 时为 null */
   mail: Record<string, MailStatus> | null
-  latency: Array<{ province: string, carrier: Carrier, ms: number | null, lost: number }>
+  /** 25 不通但 587 通的邮箱 (只记通的): 服务商封 25 时发信仍可用 */
+  mail587: Record<string, "ok"> | null
   /** hops 为空数组 = 一跳都没回应 */
   routes: Array<{ city: string, carrier: Carrier, hops: RouteHop[] }>
   /** 没测 (没加 -s / 非 Linux / 代理) 时为 null */
@@ -82,7 +82,7 @@ export interface DnsResolver {
 const str = (v: unknown) => (typeof v === "string" ? v : "")
 
 export function parseIpcheckFields(body: Record<string, unknown>): IpcheckLocal {
-  const local: IpcheckLocal = { media: {}, mail: null, latency: [], routes: [], speed: null, dnsUuid: null }
+  const local: IpcheckLocal = { media: {}, mail: null, mail587: null, routes: [], speed: null, dnsUuid: null }
 
   for (const [key] of MEDIA) {
     const m = /^(yes|no|originals|web|nov6|fail)(?:\|([A-Z]{2,3})?)?$/.exec(str(body[`media_${key}`]))
@@ -94,17 +94,9 @@ export function parseIpcheckFields(body: Record<string, unknown>): IpcheckLocal 
     if (v !== "ok" && v !== "reject" && v !== "fail") continue
     local.mail ??= {}
     local.mail[key] = v
-  }
-
-  for (const [prov] of PROVINCES) {
-    for (const carrier of CARRIERS) {
-      const v = str(body[`lat_${prov}_${carrier}`])
-      if (v === "fail") {
-        local.latency.push({ province: prov, carrier, ms: null, lost: 4 })
-        continue
-      }
-      const m = /^(\d{1,5}(?:\.\d)?)\|([0-4])$/.exec(v)
-      if (m) local.latency.push({ province: prov, carrier, ms: Number(m[1]), lost: Number(m[2]) })
+    if (v === "fail" && str(body[`mail_${key}_587`]) === "ok") {
+      local.mail587 ??= {}
+      local.mail587[key] = "ok"
     }
   }
 
@@ -158,7 +150,6 @@ function regionCode(r: string): string {
 }
 
 const T = {
-  subtitle: ["IP 质量 · 流媒体解锁 · 邮件端口 · 三网延迟与线路", "IP quality · Streaming & AI · Mail · China routes"],
   media: ["流媒体 / AI 解锁", "Streaming & AI"],
   yesStream: ["解锁", "Unlocked"],
   yesAi: ["可用", "Available"],
@@ -169,16 +160,15 @@ const T = {
   nov6: ["不支持 IPv6", "No IPv6"],
   mail: ["邮件", "Mail"],
   port25: ["25 端口出站", "Outbound port 25"],
+  port587: ["587 提交端口", "Submission port 587"],
+  port587Hint: ["25 被封但提交端口可用, 发信走 587 仍可发出", "Port 25 is blocked but submission works; mail can still be sent via 587"],
   open: ["开放", "Open"],
   blocked: ["不通", "Blocked"],
   blockedHint: ["多为服务商封禁了 25 端口", "Usually blocked by the provider"],
   handshake: ["邮箱握手", "SMTP handshake"],
-  latency: ["三网延迟 (TCP)", "China carrier latency (TCP)"],
   ct: ["电信", "Telecom"],
   cu: ["联通", "Unicom"],
   cm: ["移动", "Mobile"],
-  timeout: ["超时", "timeout"],
-  lost: ["丢", "loss"],
   route: ["三网回程线路", "Return routes to China"],
   routeNone: ["无回应", "No reply"],
   routeLegend: ["精品线路: CN2 GIA · CTGNET · 9929 · CMIN2", "Premium: CN2 GIA · CTGNET · 9929 · CMIN2"],
@@ -192,15 +182,6 @@ const T = {
   dnsNone: ["未捕获到 (系统 DNS 可能有缓存或被拦截)", "None captured (cached or intercepted)"],
   unknown: ["未知", "Unknown"],
 } satisfies Record<string, Pair>
-
-export function ipcheckSubtitle(lang: Lang): string {
-  return T.subtitle[lang === "zh" ? 0 : 1]
-}
-
-function latencyTone(ms: number): Tone {
-  // 境外到国内 150ms 上下是常态, 只把明显好的标绿、明显差的标黄
-  return ms < 100 ? "good" : ms < 200 ? "neutral" : "warn"
-}
 
 /** 本机检测的几段报告, 每段以分隔线结尾。没测的段整段不出。 */
 export function renderLocalSections(R: Renderer, local: IpcheckLocal, dns: DnsResolver[] | null): string[] {
@@ -244,26 +225,11 @@ export function renderLocalSections(R: Renderer, local: IpcheckLocal, dns: DnsRe
       }
       if (anyReject) out.push(row("", paint(lang === "zh" ? "! 连上但被拒收, 多为 IP 信誉原因" : "! connected but refused (IP reputation)", "gray")))
     }
-    out.push(hr())
-  }
-
-  if (local.latency.length) {
-    // 最长的格子是 "1164 ms loss2" (13 列), 留 1 列间隔。省名最长 "Inner Mongolia" 14 列,
-    // 这张表的标签列中英文都用 16, 不跟英文报告的 20: 2 + 16 + 3×14 = 60, 放得进 62
-    const COL = 14
-    const latRow = (label: string, value: string) => `  ${pad(label, 16)}${value}`
-    out.push(title(T.latency))
-    out.push(latRow("", CARRIERS.map((c) => paint(pad(L(T[c]), COL), "gray")).join("").trimEnd()))
-    const cell = (v?: { ms: number | null, lost: number }) => {
-      if (!v) return pad("-", COL)
-      if (v.ms === null) return tonePaint(pad(L(T.timeout), COL), "bad")
-      const s = `${Math.round(v.ms)} ms${v.lost ? ` ${L(T.lost)}${v.lost}` : ""}`
-      return tonePaint(pad(s, COL), v.lost ? "warn" : latencyTone(v.ms))
-    }
-    for (const [code, zh, en] of PROVINCES) {
-      const cells = local.latency.filter((x) => x.province === code)
-      if (!cells.length) continue
-      out.push(latRow(lang === "zh" ? zh : en, CARRIERS.map((c) => cell(cells.find((x) => x.carrier === c))).join("").trimEnd()))
+    const alt = MAIL.filter(([key]) => local.mail![key] === "fail" && local.mail587?.[key] === "ok")
+    if (alt.length) {
+      out.push(row(L(T.port587), badge(L(T.open), "good")
+        + paint(`  ${alt.map(([, name]) => name).join(" ")}`, "gray")))
+      out.push(row("", paint(L(T.port587Hint), "gray")))
     }
     out.push(hr())
   }

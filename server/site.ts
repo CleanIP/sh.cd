@@ -8,7 +8,7 @@
 import type { Lang } from "./render/base"
 import { VERSION } from "./version"
 
-export const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+export const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
 
 // Lucide 图标 (ISC 许可)
 const ICONS: Record<string, string> = {
@@ -37,7 +37,7 @@ export function ansiToHtml(input: string): string {
       if (ch.charCodeAt(0) > 127) return `<span class="w1">${escapeHtml(ch)}</span>`
       return escapeHtml(ch)
     }).join("")
-    out += classes.length ? `<span class="${classes.join(" ")}">${body}</span>` : body
+    out += classes.length ? `<span class="${[...new Set(classes)].join(" ")}">${body}</span>` : body
   }
   for (let m = re.exec(input); m; m = re.exec(input)) {
     emit(input.slice(last, m.index))

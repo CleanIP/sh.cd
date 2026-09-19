@@ -87,11 +87,15 @@ export function fmtUptime(sec: number, zh: boolean): string {
 const BLOCKS = "▁▂▃▄▅▆▇█"
 
 /** 延迟走势小图: 按给定区间映射到 8 级方块, 丢包 (null) 画成 × */
-export function spark(samples: Array<number | null>, lo: number, hi: number): string {
+export function spark(samples: Array<number | null>, lo: number, hi: number, paint?: (ch: string, s: number | null) => string): string {
   return samples.map((s) => {
-    if (s === null) return "×"
-    const r = hi > lo ? (s - lo) / (hi - lo) : 0
-    return BLOCKS[Math.max(0, Math.min(7, Math.round(r * 7)))]!
+    let ch: string
+    if (s === null) ch = "×"
+    else {
+      const r = hi > lo ? (s - lo) / (hi - lo) : 0
+      ch = BLOCKS[Math.max(0, Math.min(7, Math.round(r * 7)))]!
+    }
+    return paint ? paint(ch, s) : ch
   }).join("")
 }
 
