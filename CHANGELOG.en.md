@@ -2,30 +2,14 @@
 
 New features and fixes in each release, newest first. Versions match the script's `-v` output.
 
+## v1.3.4 · 2026-09-28
+
+### Fixed
+
+- The report endpoint only accepts requests from the sh.cd script; other programs calling it directly to look up IPs are refused
+- The run counter counts real script runs only: about 670 calls from a program hitting the endpoint on Sep 27–28 have been removed from the count
+
 ## v1.3.3 · 2026-09-19
-
-### Added
-
-- Color scales for latency: domestic green <100, yellow 200–300, red >300; international <50 / 200–400 tiers; each trend bar is colored by its own value so one retransmit shows as a yellow bar instead of being averaged away
-- Latency notes document the color scale; city and international tables share it
-
-### Fixed
-
-- English latency table label column 16→15: rows were 63 columns wide and only passed the width test via trimmed trailing spaces
-- Removed the never-submitted IP-page latency parser, unreferenced copy and functions; unused variables now fail typecheck
-
-## v1.3.2 · 2026-09-19
-
-### Added
-
-- Loss now measured over 10 samples (same as mtr's default): 10 TCP handshakes per node for China, city and education networks, 10% loss granularity and steadier medians
-- International latency takes the median of 10 per point plus a loss count, flagged yellow on loss; previously median of 3 with no loss signal
-
-### Fixed
-
-- Education-network latency accepts both 5-sample (old scripts) and 10-sample (new scripts) formats
-
-## v1.3.1 · 2026-09-19
 
 ### Added
 
@@ -42,6 +26,10 @@ New features and fixes in each release, newest first. Versions match the script'
 - TLS handshake time in local policy (to sh.cd itself): tells slow connections apart from slow handshakes
 - Probe node check `bun run probes:check`: liveness and ASN of EDU / intl latency / provincial / speed nodes, read-only
 - Unavailable IPv6 in local policy is now red (was gray); missing IPv6 is a clear gap, untested boxes still omit the row
+- Loss now measured over 10 samples (same as mtr's default): 10 TCP handshakes per node for China, city and education networks, 10% loss granularity and steadier medians
+- International latency takes the median of 10 per point plus a loss count, flagged yellow on loss; previously median of 3 with no loss signal
+- Color scales for latency: domestic green <100, yellow 200–300, red >300; international <50 / 200–400 tiers; each trend bar is colored by its own value so one retransmit shows as a yellow bar instead of being averaged away
+- Latency notes document the color scale; city and international tables share it
 
 ### Fixed
 
@@ -54,6 +42,9 @@ New features and fixes in each release, newest first. Versions match the script'
 - `check.sh`: `-S` can be repeated and accumulates; cleanup no longer runs bare `kill` with no jobs; `STAGE_COUNT` quoted; IPv6 reachability probes in route and local checks honor interface settings; `ROUTE_REUSED` initialized
 - Escaping covers single quotes; duplicate classes in ANSI-to-HTML output removed
 - Result page color rules unified with terminal reports (HTTPie / xh get colors, `?color=no` and friends accepted); dropped sections and oversize results are logged instead of silent
+- Education-network latency accepts both 5-sample (old scripts) and 10-sample (new scripts) formats
+- English latency table label column 16→15: rows were 63 columns wide and only passed the width test via trimmed trailing spaces
+- Removed the never-submitted IP-page latency parser, unreferenced copy and functions; unused variables now fail typecheck
 
 ## v1.3.0 · 2026-09-18
 
@@ -124,6 +115,7 @@ New features and fixes in each release, newest first. Versions match the script'
 - Memory throughput is no longer shown when sysbench is missing, as the fallback was inaccurate
 - Reverse DNS no longer repeats the IP when empty; BGP upstream names drop registry handles and quotes
 - Summary IP type is localized
+
 ## v1.0.0 · 2026-09-16
 
 ### Added

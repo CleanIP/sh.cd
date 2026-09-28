@@ -19,6 +19,7 @@ import { hitStats } from "./hits"
 import { landingPage } from "./landing"
 import { langOf, wantsColor } from "./render/base"
 import { handleReport, type Form } from "./report"
+import { isScriptClient } from "./limit"
 import { loadResult, resultMarkdown, resultNotFoundPage, resultPage, resultText, startResultSweeper } from "./results"
 import { withHits } from "./site"
 import { dnsProbeStart } from "./upstream"
@@ -141,6 +142,15 @@ const server = Bun.serve({
       // 终端里看: curl / wget 默认带颜色, ?color=0 / 1 手动指定; .txt 始终不带颜色 (与终端报告同一规则)
       const color = result[2] !== ".txt" && wantsColor({ color: url.searchParams.get("color") }, req.headers.get("user-agent") || "")
       return new Response(resultText(r, color), { headers: { ...headers, "content-type": "text/plain; charset=utf-8" } })
+    }
+
+    // 报告与 DNS 接口只给检测脚本用 (见 limit.ts isScriptClient); 挡在这里, 运行次数也就只算真实运行
+    if ((url.pathname === "/report" || url.pathname === "/dns/start") && req.method === "POST" && !isScriptClient(req.headers.get("user-agent"))) {
+      return new Response(
+        "sh.cd 的接口只供检测脚本使用, 请运行: bash <(curl -Ls https://sh.cd)\n需要批量查询 IP 请用 CleanIP API: https://cleanip.io\n"
+          + "This endpoint is for the sh.cd script only. For bulk IP lookups use the CleanIP API: https://cleanip.io\n",
+        { status: 403, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } },
+      )
     }
 
     if (url.pathname === "/report" && req.method === "POST") {

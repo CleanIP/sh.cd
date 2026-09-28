@@ -32,6 +32,17 @@ export function rateLimitKey(ip: string): string {
   return full.map((g) => g.replace(/^0+/, "") || "0").slice(0, 4).join(":") + "::/64"
 }
 
+/**
+ * 报告与 DNS 接口只给检测脚本用: 脚本的 UA 固定是 "sh.cd/<版本> (+https://sh.cd)" (check.sh 的 UA_SELF)。
+ * 2026-09-27 13:44 起有程序 (UA vpn-probe/cleanip) 从 532 个 VPN 出口直接调 /report 查出口 IP,
+ * 不下载也不运行脚本, 一天三百多次, 灌水运行次数又消耗 IP 查询额度。UA 能伪造, 这里只挡住不装的。
+ */
+const SCRIPT_UA = /^sh\.cd\/\d{1,3}\.\d{1,3}\.\d{1,3} \(\+https:\/\/sh\.cd\)$/
+
+export function isScriptClient(ua: string | null | undefined): boolean {
+  return SCRIPT_UA.test((ua || "").trim())
+}
+
 /** 同一个 key 在 windowMs 内最多 limit 次; 超限时给出还要等多少秒 (key 上限 2 万, 防 key 爆炸打爆内存) */
 const MAX_KEYS = 20_000
 export function rateLimit(key: string, limit: number, windowMs: number): { ok: boolean, retryAfterSec: number } {
