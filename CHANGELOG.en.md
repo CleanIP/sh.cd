@@ -8,6 +8,8 @@ New features and fixes in each release, newest first. Versions match the script'
 
 - The report endpoint only accepts requests from the sh.cd script; other programs calling it directly to look up IPs are refused
 - The run counter counts real script runs only: about 670 calls from a program hitting the endpoint on Sep 27–28 have been removed from the count
+- The last batch of CERNET routes and city latency could be lost (CERNET missing Yunnan, Tibet, Shaanxi, Gansu, Qinghai, Ningxia, Xinjiang), and a few `No such file or directory` lines appeared after the script finished
+- Option order no longer changes the stage order: `-R -c` used to run routes before the network stage and probe all provinces twice
 
 ## v1.3.3 · 2026-09-19
 

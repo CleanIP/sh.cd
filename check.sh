@@ -1505,14 +1505,18 @@ zj_wenzhou_cu|zj-wenzhou-cu-v4.ip.zstaticcdn.com
 "
 
 run_latency_city() {
-	local d="$1" line key host n=0
+	local d="$1" key host n=0
 	mkdir -p "$d/latc"
-	printf '%s\n' "$CITY_NODES" | while IFS='|' read -r key host; do
+	# 循环不能放在管道里 (printf | while): 那样后台任务属于管道的子 shell, 最后的 wait 等不到它们,
+	# 脚本结束删了临时目录它们还在写 (2026-09-28 macOS 上报 "fields: No such file or directory")
+	while IFS='|' read -r key host; do
 		[ -n "$host" ] || continue
 		(put "$d/latc" "latc_$key" "$(lat_node "$host")") &
 		n=$((n + 1))
 		[ $((n % 18)) = 0 ] && wait
-	done
+	done <<EOF
+$CITY_NODES
+EOF
 	wait
 }
 
@@ -1666,7 +1670,8 @@ run_route_edu() {
 	fi
 	mkdir -p "$d/$dir"
 	batch=$(route_batch)
-	printf '%s\n' "$EDU_NODES" | while IFS='|' read -r prov v4 v6; do
+	# 不用 printf | while: 后台任务要属于当前 shell, 下面的 wait 才等得到 (见 run_latency_city)
+	while IFS='|' read -r prov v4 v6; do
 		[ -n "$prov" ] || continue
 		ip=$v4
 		[ "$fam" = 6 ] && ip=$v6
@@ -1679,7 +1684,9 @@ run_route_edu() {
 		) &
 		n=$((n + 1))
 		[ $((n % batch)) = 0 ] && wait
-	done
+	done <<EOF
+$EDU_NODES
+EOF
 	wait
 	[ "$DEEP" = 1 ] && route_rtt "$d/$dir" "$sep"
 	return 0
@@ -2272,6 +2279,13 @@ if [ -z "$STAGES" ]; then
 	if [ "$INTERACTIVE" = 1 ]; then menu_select; else STAGES=" ip"; fi
 fi
 
+# 阶段按固定顺序跑, 与参数先后无关: 回程详情排在网络质量后面才能复用它测过的回程
+# (此前 -R -c 会先跑回程再跑网络, 全省 93 条扫两遍)
+ordered=""
+for s in hw ip net route; do
+	case " $STAGES " in *" $s "*) ordered="$ordered $s" ;; esac
+done
+STAGES=$ordered
 STAGE_COUNT=$(printf '%s' "$STAGES" | wc -w | tr -d ' ')
 ALL="$TMP/all.fields"
 : >"$ALL"

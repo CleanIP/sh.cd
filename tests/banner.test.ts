@@ -24,3 +24,17 @@ test("变量后面紧跟非 ASCII 字符时必须加花括号", () => {
     .filter(([, line]) => !line.trimStart().startsWith("#") && /\$[A-Za-z_]\w*[^\x00-\x7F]/.test(line));
   expect(bad).toEqual([]);
 });
+
+test("管道里的 while 循环不能起后台任务", () => {
+  // printf … | while … ( … ) & … done; wait —— 后台任务属于管道的子 shell, wait 等不到,
+  // 脚本结束删了临时目录它们还在写 (2026-09-28 教育网回程 / 市级延迟的最后一批)
+  const lines = readFileSync(resolve(import.meta.dir, "../check.sh"), "utf8").split("\n");
+  const bad: number[] = [];
+  lines.forEach((line, i) => {
+    if (line.trimStart().startsWith("#") || !/\|\s*while\b/.test(line)) return;
+    for (let j = i + 1; j < lines.length && !/^\s*done\b/.test(lines[j]!); j++) {
+      if (/\)\s*&\s*$|\s&\s*$/.test(lines[j]!)) { bad.push(i + 1); break; }
+    }
+  });
+  expect(bad).toEqual([]);
+});
