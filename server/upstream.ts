@@ -8,6 +8,7 @@
 //   DNS_PROBE_NS_URLS      权威 NS 的事件接口, 逗号分隔
 //   DNS_PROBE_TOKEN
 
+import { createHmac } from "node:crypto"
 import type { FullReport } from "./render/ip"
 import type { BgpInfo } from "./render/net"
 import type { DnsResolver } from "./render/local"
@@ -42,6 +43,10 @@ function cleanip<T>(path: string, caller: string, opts: { timeout: number, metho
   if (env("CLEANIP_API_KEY") && env("CLEANIP_ORIGIN")) {
     headers["x-api-key"] = env("CLEANIP_API_KEY")
     headers.origin = env("CLEANIP_ORIGIN")
+    // 与 CleanIP 后端 siteInternalProof 一致: 内部服务直连需要证明持有 key,
+    // 只有 key + Origin 会按浏览器请求处理, 返回 401 need_token。
+    headers["x-cleanip-internal"] = createHmac("sha256", headers["x-api-key"])
+      .update("cleanip-site-internal-v1").digest("hex")
   }
   return getJson<T>(`${env("CLEANIP_API").replace(/\/+$/, "")}${path}`, { ...opts, headers })
 }
